@@ -13,7 +13,7 @@ interface HiddenPathDao {
     fun observeAll(): Flow<List<HiddenPathEntity>>
 
     @Query("SELECT path FROM hidden_paths")
-    fun observeAllPaths(): Flow<Set<String>>
+    fun observeAllPaths(): Flow<List<String>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun hide(entity: HiddenPathEntity)
