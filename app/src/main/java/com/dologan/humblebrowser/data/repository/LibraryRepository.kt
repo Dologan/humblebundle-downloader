@@ -168,14 +168,30 @@ class LibraryRepository @Inject constructor(
 
     private suspend fun fetchPurchaseKeys(): List<String> {
         val html = api.getLibraryPage()
+
+        // If the response is a redirect to the login page, the cookie is invalid
+        if (html.contains("/login") && !html.contains("user-home-json-data")) {
+            throw IllegalStateException(
+                "Session expired or invalid. Please sign out and sign in again."
+            )
+        }
+
         val doc = Jsoup.parse(html)
         val jsonElement = doc.selectFirst("#user-home-json-data")
-            ?: throw IllegalStateException("Could not find library data in page")
+            ?: throw IllegalStateException(
+                "Could not find library data in page. Your session cookie may be invalid — try signing out and back in."
+            )
 
-        val jsonText = jsonElement.text()
+        // parsel (Python) uses xpath("string()") which extracts all nested text.
+        // Jsoup's .text() does the same, but .data() works for <script> tags.
+        val jsonText = jsonElement.text().ifBlank { jsonElement.data() }
+        if (jsonText.isBlank()) {
+            throw IllegalStateException("Library data element was empty.")
+        }
+
         val jsonObj = Gson().fromJson(jsonText, JsonObject::class.java)
         val keysArray = jsonObj.getAsJsonArray("gamekeys")
-            ?: throw IllegalStateException("No gamekeys found in library data")
+            ?: throw IllegalStateException("No purchase keys found in library data.")
 
         return keysArray.map { it.asString }
     }
