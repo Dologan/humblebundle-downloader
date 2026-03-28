@@ -1,8 +1,6 @@
 package com.dologan.humblebrowser.ui
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.NavHost
@@ -23,11 +21,9 @@ object Routes {
 fun HumbleBrowserNavHost() {
     val navController = rememberNavController()
     val loginViewModel: LoginViewModel = hiltViewModel()
-    val isLoggedIn by loginViewModel.isLoggedIn.collectAsState()
 
-    // Lock in the start destination at first composition.
-    // NavHost only reads this once — subsequent changes are handled by explicit navigation.
-    val startDestination = remember { if (isLoggedIn) Routes.BROWSER else Routes.LOGIN }
+    // Decide start destination once, based on whether a session cookie is stored.
+    val startDestination = remember { if (loginViewModel.hasStoredSession()) Routes.BROWSER else Routes.LOGIN }
 
     NavHost(navController = navController, startDestination = startDestination) {
         composable(Routes.LOGIN) {

@@ -1,11 +1,16 @@
 package com.dologan.humblebrowser.ui.auth
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.dologan.humblebrowser.data.prefs.AuthPreferences
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
@@ -13,22 +18,21 @@ class LoginViewModel @Inject constructor(
     private val authPreferences: AuthPreferences,
 ) : ViewModel() {
 
-    private val _isLoggedIn = MutableStateFlow(authPreferences.isLoggedIn())
-    val isLoggedIn: StateFlow<Boolean> = _isLoggedIn.asStateFlow()
+    /** One-shot event: emitted only when the user actively completes a login. */
+    private val _loginComplete = MutableSharedFlow<Unit>()
+    val loginComplete: SharedFlow<Unit> = _loginComplete.asSharedFlow()
 
-    private val _showManualEntry = MutableStateFlow(false)
-    val showManualEntry: StateFlow<Boolean> = _showManualEntry.asStateFlow()
+    /** Whether we currently have a stored cookie (used by Navigation for startDestination). */
+    fun hasStoredSession(): Boolean = authPreferences.isLoggedIn()
 
     private val _manualCookieText = MutableStateFlow("")
     val manualCookieText: StateFlow<String> = _manualCookieText.asStateFlow()
 
     fun onCookieExtracted(cookie: String) {
         authPreferences.setSessionCookie(cookie)
-        _isLoggedIn.value = true
-    }
-
-    fun toggleManualEntry() {
-        _showManualEntry.value = !_showManualEntry.value
+        viewModelScope.launch {
+            _loginComplete.emit(Unit)
+        }
     }
 
     fun onManualCookieChanged(text: String) {
@@ -44,6 +48,5 @@ class LoginViewModel @Inject constructor(
 
     fun logout() {
         authPreferences.clear()
-        _isLoggedIn.value = false
     }
 }

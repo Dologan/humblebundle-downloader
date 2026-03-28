@@ -52,13 +52,13 @@ fun LoginScreen(
     onLoginSuccess: () -> Unit,
     viewModel: LoginViewModel = hiltViewModel(),
 ) {
-    val isLoggedIn by viewModel.isLoggedIn.collectAsState()
     val manualCookieText by viewModel.manualCookieText.collectAsState()
     var loginMethod by remember { mutableStateOf(LoginMethod.CHOOSE) }
     var isLoading by remember { mutableStateOf(true) }
 
-    LaunchedEffect(isLoggedIn) {
-        if (isLoggedIn) onLoginSuccess()
+    // Only fires when the user actively completes a login (not on initial composition)
+    LaunchedEffect(Unit) {
+        viewModel.loginComplete.collect { onLoginSuccess() }
     }
 
     Scaffold(
