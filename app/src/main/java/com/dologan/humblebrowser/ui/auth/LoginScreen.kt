@@ -21,6 +21,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,9 +43,11 @@ fun LoginScreen(
     val manualCookieText by viewModel.manualCookieText.collectAsState()
     var isLoading by remember { mutableStateOf(true) }
 
-    if (isLoggedIn) {
-        onLoginSuccess()
-        return
+    // Navigate only from a side-effect, never directly in the composition body
+    LaunchedEffect(isLoggedIn) {
+        if (isLoggedIn) {
+            onLoginSuccess()
+        }
     }
 
     Scaffold(
@@ -110,21 +113,27 @@ fun LoginScreen(
                     onClick = { viewModel.toggleManualEntry() },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(if (showManualEntry) "Use WebView Login" else "Advanced: Enter Cookie Manually")
+                    Text(if (showManualEntry) "Use WebView Login" else "Advanced: Paste Cookie Manually")
                 }
 
                 AnimatedVisibility(visible = showManualEntry) {
                     Column {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Paste your _simpleauth_sess cookie value from your browser:",
+                            text = "Copy the _simpleauth_sess cookie value from your browser and paste it below.",
                             style = MaterialTheme.typography.bodySmall,
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "In Chrome/Firefox: open humblebundle.com, then DevTools → Application → Cookies.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         OutlinedTextField(
                             value = manualCookieText,
                             onValueChange = { viewModel.onManualCookieChanged(it) },
-                            label = { Text("Cookie value") },
+                            label = { Text("_simpleauth_sess value") },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                         )

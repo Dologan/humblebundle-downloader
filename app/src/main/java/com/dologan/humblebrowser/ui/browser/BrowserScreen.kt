@@ -1,8 +1,10 @@
 package com.dologan.humblebrowser.ui.browser
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -10,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
@@ -18,6 +21,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -36,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.dologan.humblebrowser.data.db.entities.DownloadState
@@ -52,6 +57,7 @@ import com.dologan.humblebrowser.util.FileActions
 @Composable
 fun BrowserScreen(
     onNavigateToSettings: () -> Unit,
+    onSignIn: () -> Unit,
     onLogout: () -> Unit,
     viewModel: BrowserViewModel = hiltViewModel(),
 ) {
@@ -111,7 +117,8 @@ fun BrowserScreen(
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text("Sign Out") },
+                            text = { Text("Switch Account / Sign Out") },
+                            leadingIcon = { Icon(Icons.Default.AccountCircle, contentDescription = null) },
                             onClick = {
                                 showMenu = false
                                 onLogout()
@@ -170,11 +177,38 @@ fun BrowserScreen(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(
-                            text = if (state.searchQuery.isNotBlank()) "No results found"
-                            else "No items to display.\nPull to refresh.",
-                            style = MaterialTheme.typography.bodyLarge,
-                        )
+                        if (state.searchQuery.isNotBlank()) {
+                            Text(
+                                text = "No results found",
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                        } else {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(16.dp),
+                                modifier = Modifier.padding(32.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AccountCircle,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(64.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    text = "No library loaded",
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                                Text(
+                                    text = "Sign in to your Humble Bundle account to browse and download your library.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center,
+                                )
+                                Button(onClick = onSignIn) {
+                                    Text("Sign In to Humble Bundle")
+                                }
+                            }
+                        }
                     }
                 } else {
                     LazyColumn(modifier = Modifier.fillMaxSize()) {

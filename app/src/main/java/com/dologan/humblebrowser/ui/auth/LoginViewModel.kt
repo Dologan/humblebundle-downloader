@@ -6,7 +6,6 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 
 @HiltViewModel
@@ -14,7 +13,8 @@ class LoginViewModel @Inject constructor(
     private val authPreferences: AuthPreferences,
 ) : ViewModel() {
 
-    val isLoggedIn: StateFlow<Boolean> = MutableStateFlow(authPreferences.isLoggedIn())
+    private val _isLoggedIn = MutableStateFlow(authPreferences.isLoggedIn())
+    val isLoggedIn: StateFlow<Boolean> = _isLoggedIn.asStateFlow()
 
     private val _showManualEntry = MutableStateFlow(false)
     val showManualEntry: StateFlow<Boolean> = _showManualEntry.asStateFlow()
@@ -24,7 +24,7 @@ class LoginViewModel @Inject constructor(
 
     fun onCookieExtracted(cookie: String) {
         authPreferences.setSessionCookie(cookie)
-        (isLoggedIn as MutableStateFlow).value = true
+        _isLoggedIn.value = true
     }
 
     fun toggleManualEntry() {
@@ -44,6 +44,6 @@ class LoginViewModel @Inject constructor(
 
     fun logout() {
         authPreferences.clear()
-        (isLoggedIn as MutableStateFlow).value = false
+        _isLoggedIn.value = false
     }
 }
