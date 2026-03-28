@@ -65,10 +65,10 @@ fun TreeNodeRow(
                         is TreeNode.GroupNode -> onToggleExpand()
                         is TreeNode.ProductNode -> onToggleExpand()
                         is TreeNode.FileNode -> {
-                            if (node.file.downloadState == DownloadState.COMPLETE) {
-                                onOpen()
-                            } else if (node.file.downloadState == DownloadState.NONE) {
-                                onDownload()
+                            when (node.file.downloadState) {
+                                DownloadState.COMPLETE -> onOpen()
+                                DownloadState.DOWNLOADING -> onDownload() // triggers cancel
+                                else -> showContextMenu = true
                             }
                         }
                     }
@@ -217,24 +217,35 @@ fun TreeNodeRow(
                 )
             } else if (node !is TreeNode.FileNode) {
                 DropdownMenuItem(
-                    text = { Text("Hide") },
-                    onClick = {
-                        showContextMenu = false
-                        onHide()
-                    },
-                )
-                DropdownMenuItem(
                     text = { Text("Download All") },
                     onClick = {
                         showContextMenu = false
                         onDownload()
                     },
                 )
+                DropdownMenuItem(
+                    text = { Text("Hide") },
+                    onClick = {
+                        showContextMenu = false
+                        onHide()
+                    },
+                )
             }
             if (node is TreeNode.FileNode) {
-                if (node.file.downloadState != DownloadState.COMPLETE) {
+                if (node.file.downloadState == DownloadState.NONE ||
+                    node.file.downloadState == DownloadState.FAILED
+                ) {
                     DropdownMenuItem(
                         text = { Text("Download") },
+                        onClick = {
+                            showContextMenu = false
+                            onDownload()
+                        },
+                    )
+                }
+                if (node.file.downloadState == DownloadState.DOWNLOADING) {
+                    DropdownMenuItem(
+                        text = { Text("Cancel Download") },
                         onClick = {
                             showContextMenu = false
                             onDownload()
@@ -257,6 +268,13 @@ fun TreeNodeRow(
                         },
                     )
                 }
+                DropdownMenuItem(
+                    text = { Text("Hide") },
+                    onClick = {
+                        showContextMenu = false
+                        onHide()
+                    },
+                )
             }
         }
     }

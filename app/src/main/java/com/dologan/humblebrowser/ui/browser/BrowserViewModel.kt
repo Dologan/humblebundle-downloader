@@ -78,9 +78,11 @@ class BrowserViewModel @Inject constructor(
             _searchQuery,
             _viewMode,
             _platformFilters,
-            _extensionFilters,
-        ) { expanded, search, viewMode, platforms, extensions ->
-            FilterState(expanded, search, viewMode, platforms, extensions)
+            combine(_extensionFilters, _showHidden, _autoHideEmpty) { ext, show, autoHide ->
+                Triple(ext, show, autoHide)
+            },
+        ) { expanded, search, viewMode, platforms, (extensions, showHidden, autoHideEmpty) ->
+            FilterState(expanded, search, viewMode, platforms, extensions, showHidden, autoHideEmpty)
         }
     ) { dbState, filterState ->
         dbState.copy(
@@ -88,18 +90,18 @@ class BrowserViewModel @Inject constructor(
             viewMode = filterState.viewMode,
             activePlatformFilters = filterState.platforms,
             activeExtensionFilters = filterState.extensions,
+            showHidden = filterState.showHidden,
+            autoHideEmpty = filterState.autoHideEmpty,
         ).let { state ->
             state.copy(tree = buildTree(state, filterState))
         }
     }.combine(
-        combine(_isSyncing, _showHidden, _autoHideEmpty, _errorMessage) { syncing, showHidden, autoHide, error ->
-            Triple(syncing, showHidden to autoHide, error)
+        combine(_isSyncing, _errorMessage) { syncing, error ->
+            syncing to error
         }
-    ) { state, (syncing, hideSettings, error) ->
+    ) { state, (syncing, error) ->
         state.copy(
             isSyncing = syncing,
-            showHidden = hideSettings.first,
-            autoHideEmpty = hideSettings.second,
             errorMessage = error,
         )
     }.stateIn(
@@ -114,6 +116,8 @@ class BrowserViewModel @Inject constructor(
         val viewMode: ViewMode,
         val platforms: Set<String>,
         val extensions: Set<String>,
+        val showHidden: Boolean,
+        val autoHideEmpty: Boolean,
     )
 
     // Cached data references for tree building
@@ -143,11 +147,12 @@ class BrowserViewModel @Inject constructor(
     }
 
     private fun buildTree(state: BrowserUiState, filterState: FilterState): List<TreeNode> {
+        val searchActive = filterState.search.isNotBlank()
         val filteredFiles = cachedFiles.filter { file ->
             val platformOk = filterState.platforms.isEmpty() || file.platform in filterState.platforms
             val extOk = filterState.extensions.isEmpty() ||
                 extractExtension(file.filename) in filterState.extensions
-            val searchOk = filterState.search.isBlank() ||
+            val searchOk = !searchActive ||
                 file.filename.contains(filterState.search, ignoreCase = true)
 
             platformOk && extOk && searchOk
@@ -159,13 +164,13 @@ class BrowserViewModel @Inject constructor(
 
         return when (filterState.viewMode) {
             ViewMode.BY_BUNDLE -> buildByBundleTree(
-                bundleMap, productMap, productFileMap, filterState.expanded,
+                bundleMap, productMap, productFileMap, filterState.expanded, filterState,
             )
             ViewMode.BY_TYPE -> buildByTypeTree(
                 bundleMap, productMap, productFileMap, filteredFiles, filterState.expanded,
             )
             ViewMode.ALPHABETICAL -> buildAlphabeticalTree(
-                bundleMap, productMap, productFileMap, filterState.expanded,
+                bundleMap, productMap, productFileMap, filterState.expanded, filterState,
             )
         }
     }
@@ -175,27 +180,33 @@ class BrowserViewModel @Inject constructor(
         productMap: Map<String, ProductEntity>,
         productFileMap: Map<String, List<FileEntity>>,
         expanded: Set<String>,
+        filterState: FilterState,
     ): List<TreeNode> {
         val nodes = mutableListOf<TreeNode>()
         val bundleProducts = cachedProducts.groupBy { it.orderId }
+        val searchActive = filterState.search.isNotBlank()
 
         for (bundle in cachedBundles) {
             val bundlePath = bundle.bundleName
             val isHidden = bundlePath in cachedHiddenPaths
-            if (isHidden && !_showHidden.value) continue
+            if (isHidden && !filterState.showHidden) continue
             if (cachedExclusionMatcher.isExcluded(bundlePath)) continue
 
             val products = bundleProducts[bundle.orderId] ?: emptyList()
             val visibleProducts = products.filter { p ->
                 val pPath = "$bundlePath/${p.humanName}"
                 val pHidden = pPath in cachedHiddenPaths
-                if (pHidden && !_showHidden.value) return@filter false
+                if (pHidden && !filterState.showHidden) return@filter false
                 if (cachedExclusionMatcher.isExcluded(pPath)) return@filter false
-                if (_autoHideEmpty.value && (productFileMap[p.id]?.isEmpty() != false)) return@filter false
+                if (productFileMap[p.id]?.isEmpty() != false) {
+                    // Hide products with no matching files when auto-hide or search is active
+                    if (filterState.autoHideEmpty || searchActive) return@filter false
+                }
                 true
             }
 
-            if (_autoHideEmpty.value && visibleProducts.isEmpty()) continue
+            // Hide empty bundles when auto-hide is on or search is active
+            if (visibleProducts.isEmpty() && (filterState.autoHideEmpty || searchActive)) continue
 
             nodes.add(
                 TreeNode.GroupNode(
@@ -308,6 +319,7 @@ class BrowserViewModel @Inject constructor(
         productMap: Map<String, ProductEntity>,
         productFileMap: Map<String, List<FileEntity>>,
         expanded: Set<String>,
+        filterState: FilterState,
     ): List<TreeNode> {
         val nodes = mutableListOf<TreeNode>()
         val sortedProducts = cachedProducts
@@ -319,7 +331,7 @@ class BrowserViewModel @Inject constructor(
             val bundleName = bundle?.bundleName ?: "Unknown"
             val productPath = "$bundleName/${product.humanName}"
             val isHidden = productPath in cachedHiddenPaths
-            if (isHidden && !_showHidden.value) continue
+            if (isHidden && !filterState.showHidden) continue
 
             val files = productFileMap[product.id] ?: emptyList()
 

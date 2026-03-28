@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -28,8 +29,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -46,7 +47,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.dologan.humblebrowser.data.db.entities.DownloadState
 import com.dologan.humblebrowser.data.db.entities.FileEntity
 import com.dologan.humblebrowser.domain.model.TreeNode
-import com.dologan.humblebrowser.domain.model.ViewMode
 import com.dologan.humblebrowser.ui.components.FilterBar
 import com.dologan.humblebrowser.ui.components.LargeFileConfirmDialog
 import com.dologan.humblebrowser.ui.components.SearchBar
@@ -67,6 +67,7 @@ fun BrowserScreen(
     var showMenu by remember { mutableStateOf(false) }
     var showFilters by remember { mutableStateOf(false) }
     var pendingLargeFile by remember { mutableStateOf<Triple<FileEntity, String, String>?>(null) }
+    var showFullReloadConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         viewModel.sync()
@@ -87,13 +88,21 @@ fun BrowserScreen(
                     IconButton(onClick = { showFilters = !showFilters }) {
                         Icon(Icons.Default.FilterList, contentDescription = "Filters")
                     }
-                    IconButton(onClick = { viewModel.sync(forceRefresh = true) }) {
+                    IconButton(onClick = { viewModel.sync() }) {
                         Icon(Icons.Default.Refresh, contentDescription = "Sync")
                     }
                     IconButton(onClick = { showMenu = true }) {
                         Icon(Icons.Default.MoreVert, contentDescription = "More")
                     }
                     DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Full Reload") },
+                            leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+                            onClick = {
+                                showMenu = false
+                                showFullReloadConfirm = true
+                            },
+                        )
                         DropdownMenuItem(
                             text = { Text(if (state.showHidden) "Hide Hidden Items" else "Show Hidden Items") },
                             onClick = {
@@ -167,88 +176,104 @@ fun BrowserScreen(
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
 
-            PullToRefreshBox(
-                isRefreshing = state.isSyncing,
-                onRefresh = { viewModel.sync(forceRefresh = true) },
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                if (state.tree.isEmpty() && !state.isSyncing) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (state.searchQuery.isNotBlank()) {
-                            Text(
-                                text = "No results found",
-                                style = MaterialTheme.typography.bodyLarge,
+            if (state.tree.isEmpty() && !state.isSyncing) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (state.searchQuery.isNotBlank()) {
+                        Text(
+                            text = "No results found",
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    } else {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            modifier = Modifier.padding(32.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AccountCircle,
+                                contentDescription = null,
+                                modifier = Modifier.size(64.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                        } else {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(16.dp),
-                                modifier = Modifier.padding(32.dp),
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.AccountCircle,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(64.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                Text(
-                                    text = "No library loaded",
-                                    style = MaterialTheme.typography.titleMedium,
-                                )
-                                Text(
-                                    text = "Sign in to your Humble Bundle account to browse and download your library.",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = TextAlign.Center,
-                                )
-                                Button(onClick = onSignIn) {
-                                    Text("Sign In to Humble Bundle")
-                                }
+                            Text(
+                                text = "No library loaded",
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                text = "Sign in to your Humble Bundle account to browse and download your library.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                            )
+                            Button(onClick = onSignIn) {
+                                Text("Sign In to Humble Bundle")
                             }
                         }
                     }
-                } else {
-                    LazyColumn(modifier = Modifier.fillMaxSize()) {
-                        items(
-                            items = state.tree,
-                            key = { it.key },
-                        ) { node ->
-                            TreeNodeRow(
-                                node = node,
-                                onToggleExpand = { viewModel.toggleExpanded(node.key) },
-                                onHide = { viewModel.hidePath(node.virtualPath) },
-                                onUnhide = { viewModel.unhidePath(node.virtualPath) },
-                                onDownload = {
-                                    if (node is TreeNode.FileNode) {
-                                        val file = node.file
-                                        if (file.downloadState == DownloadState.DOWNLOADING) {
-                                            viewModel.cancelDownload(file.id)
-                                        } else if (viewModel.isLargeFile(file)) {
-                                            pendingLargeFile = Triple(file, node.bundleName, node.productName)
-                                        } else {
-                                            viewModel.downloadFile(file, node.bundleName, node.productName)
-                                        }
+                }
+            } else {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    items(
+                        items = state.tree,
+                        key = { it.key },
+                    ) { node ->
+                        TreeNodeRow(
+                            node = node,
+                            onToggleExpand = { viewModel.toggleExpanded(node.key) },
+                            onHide = { viewModel.hidePath(node.virtualPath) },
+                            onUnhide = { viewModel.unhidePath(node.virtualPath) },
+                            onDownload = {
+                                if (node is TreeNode.FileNode) {
+                                    val file = node.file
+                                    if (file.downloadState == DownloadState.DOWNLOADING) {
+                                        viewModel.cancelDownload(file.id)
+                                    } else if (viewModel.isLargeFile(file)) {
+                                        pendingLargeFile = Triple(file, node.bundleName, node.productName)
+                                    } else {
+                                        viewModel.downloadFile(file, node.bundleName, node.productName)
                                     }
-                                },
-                                onOpen = {
-                                    if (node is TreeNode.FileNode) {
-                                        node.file.localPath?.let { FileActions.openFile(context, it) }
-                                    }
-                                },
-                                onShare = {
-                                    if (node is TreeNode.FileNode) {
-                                        node.file.localPath?.let { FileActions.shareFile(context, it) }
-                                    }
-                                },
-                            )
-                        }
+                                }
+                            },
+                            onOpen = {
+                                if (node is TreeNode.FileNode) {
+                                    node.file.localPath?.let { FileActions.openFile(context, it) }
+                                }
+                            },
+                            onShare = {
+                                if (node is TreeNode.FileNode) {
+                                    node.file.localPath?.let { FileActions.shareFile(context, it) }
+                                }
+                            },
+                        )
                     }
                 }
             }
         }
+    }
+
+    // Full reload confirmation dialog
+    if (showFullReloadConfirm) {
+        AlertDialog(
+            onDismissRequest = { showFullReloadConfirm = false },
+            title = { Text("Full Reload") },
+            text = { Text("This will re-download all library metadata from Humble Bundle. This may take a while if you have many purchases.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showFullReloadConfirm = false
+                    viewModel.sync(forceRefresh = true)
+                }) {
+                    Text("Reload")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFullReloadConfirm = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
 
     pendingLargeFile?.let { (file, bundleName, productName) ->
