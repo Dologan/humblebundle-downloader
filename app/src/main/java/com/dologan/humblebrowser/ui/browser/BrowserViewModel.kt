@@ -11,6 +11,7 @@ import com.dologan.humblebrowser.data.db.entities.BundleEntity
 import com.dologan.humblebrowser.data.db.entities.FileEntity
 import com.dologan.humblebrowser.data.db.entities.HiddenPathEntity
 import com.dologan.humblebrowser.data.db.entities.ProductEntity
+import com.dologan.humblebrowser.data.prefs.AuthPreferences
 import com.dologan.humblebrowser.data.repository.LibraryRepository
 import com.dologan.humblebrowser.download.DownloadManager
 import com.dologan.humblebrowser.domain.model.TreeNode
@@ -44,6 +45,7 @@ data class BrowserUiState(
 @HiltViewModel
 class BrowserViewModel @Inject constructor(
     private val libraryRepository: LibraryRepository,
+    private val authPreferences: AuthPreferences,
     private val bundleDao: BundleDao,
     private val productDao: ProductDao,
     private val fileDao: FileDao,
@@ -394,6 +396,7 @@ class BrowserViewModel @Inject constructor(
     }
 
     fun sync(forceRefresh: Boolean = false) {
+        if (!authPreferences.isLoggedIn()) return // nothing to sync without a session
         viewModelScope.launch {
             _isSyncing.value = true
             _errorMessage.value = null

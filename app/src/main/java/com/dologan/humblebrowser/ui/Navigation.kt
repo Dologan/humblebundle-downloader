@@ -1,7 +1,6 @@
 package com.dologan.humblebrowser.ui
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -23,23 +22,12 @@ object Routes {
 @Composable
 fun HumbleBrowserNavHost() {
     val navController = rememberNavController()
-    // Activity-scoped ViewModel — persists for the lifetime of the activity
     val loginViewModel: LoginViewModel = hiltViewModel()
     val isLoggedIn by loginViewModel.isLoggedIn.collectAsState()
 
-    // Capture the auth state at first composition only, so NavHost gets a stable startDestination.
-    // NavHost ignores changes to startDestination after the first composition.
+    // Lock in the start destination at first composition.
+    // NavHost only reads this once — subsequent changes are handled by explicit navigation.
     val startDestination = remember { if (isLoggedIn) Routes.BROWSER else Routes.LOGIN }
-
-    // React to auth state changes that happen after the NavHost is already composed
-    // (e.g. session expiry or logout from deep within the back stack).
-    LaunchedEffect(isLoggedIn) {
-        if (!isLoggedIn) {
-            navController.navigate(Routes.LOGIN) {
-                popUpTo(0) { inclusive = true }
-            }
-        }
-    }
 
     NavHost(navController = navController, startDestination = startDestination) {
         composable(Routes.LOGIN) {
@@ -57,13 +45,13 @@ fun HumbleBrowserNavHost() {
                     navController.navigate(Routes.SETTINGS)
                 },
                 onSignIn = {
-                    navController.navigate(Routes.LOGIN) {
-                        popUpTo(Routes.BROWSER) { inclusive = true }
-                    }
+                    navController.navigate(Routes.LOGIN)
                 },
                 onLogout = {
                     loginViewModel.logout()
-                    // LaunchedEffect above handles the navigation to LOGIN
+                    navController.navigate(Routes.LOGIN) {
+                        popUpTo(0) { inclusive = true }
+                    }
                 },
             )
         }
