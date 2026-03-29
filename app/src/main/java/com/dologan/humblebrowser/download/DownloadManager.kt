@@ -9,6 +9,7 @@ import androidx.work.workDataOf
 import com.dologan.humblebrowser.data.db.dao.FileDao
 import com.dologan.humblebrowser.data.db.entities.DownloadState
 import com.dologan.humblebrowser.data.db.entities.FileEntity
+import com.dologan.humblebrowser.data.prefs.AppPreferences
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -25,6 +26,7 @@ import javax.inject.Singleton
 class DownloadManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val fileDao: FileDao,
+    private val appPreferences: AppPreferences,
 ) {
     private val workManager = WorkManager.getInstance(context)
     private val activeDownloads = mutableMapOf<String, UUID>()
@@ -39,13 +41,34 @@ class DownloadManager @Inject constructor(
     }
 
     suspend fun enqueueDownload(file: FileEntity, bundleName: String, productName: String): UUID {
-        // Set state immediately so UI updates right away
+        return enqueueDownloadToPath(
+            file = file,
+            destPath = File(getDownloadDir(), "$bundleName/$productName/${file.filename}").absolutePath,
+        )
+    }
+
+    suspend fun enqueueDownloadToUri(file: FileEntity, destUri: android.net.Uri): UUID {
         fileDao.setDownloadState(file.id, DownloadState.DOWNLOADING)
 
-        val destPath = File(
-            getDownloadDir(),
-            "$bundleName/$productName/${file.filename}",
-        ).absolutePath
+        val inputData = workDataOf(
+            DownloadWorker.KEY_FILE_ID to file.id,
+            DownloadWorker.KEY_DOWNLOAD_URL to file.downloadUrl,
+            DownloadWorker.KEY_DEST_URI to destUri.toString(),
+        )
+
+        val workRequest = OneTimeWorkRequestBuilder<DownloadWorker>()
+            .setInputData(inputData)
+            .addTag("download")
+            .addTag("file:${file.id}")
+            .build()
+
+        activeDownloads[file.id] = workRequest.id
+        workManager.enqueue(workRequest)
+        return workRequest.id
+    }
+
+    private suspend fun enqueueDownloadToPath(file: FileEntity, destPath: String): UUID {
+        fileDao.setDownloadState(file.id, DownloadState.DOWNLOADING)
 
         val inputData = workDataOf(
             DownloadWorker.KEY_FILE_ID to file.id,
@@ -91,11 +114,6 @@ class DownloadManager @Inject constructor(
         fileDao.updateDownloadState(fileId, DownloadState.NONE, null)
     }
 
-    fun isLargeFile(file: FileEntity): Boolean {
-        return file.fileSize > LARGE_FILE_THRESHOLD
-    }
-
-    companion object {
-        const val LARGE_FILE_THRESHOLD = 50L * 1024 * 1024 // 50MB
-    }
+    fun isLargeFile(file: FileEntity): Boolean =
+        file.fileSize > appPreferences.getLargeFileSizeMb() * 1024 * 1024
 }

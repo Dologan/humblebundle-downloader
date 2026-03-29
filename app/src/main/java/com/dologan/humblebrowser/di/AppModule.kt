@@ -11,7 +11,9 @@ import com.dologan.humblebrowser.data.db.dao.BundleDao
 import com.dologan.humblebrowser.data.db.dao.ExclusionRuleDao
 import com.dologan.humblebrowser.data.db.dao.FileDao
 import com.dologan.humblebrowser.data.db.dao.HiddenPathDao
+import com.dologan.humblebrowser.data.db.dao.ItemTagDao
 import com.dologan.humblebrowser.data.db.dao.ProductDao
+import com.dologan.humblebrowser.data.prefs.AppPreferences
 import com.dologan.humblebrowser.data.prefs.AuthPreferences
 import dagger.Module
 import dagger.Provides
@@ -29,6 +31,13 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 object AppModule {
+
+    @Provides
+    @Singleton
+    fun provideAppPreferences(@ApplicationContext context: Context): AppPreferences {
+        val prefs = context.getSharedPreferences("humble_app_prefs", android.content.Context.MODE_PRIVATE)
+        return AppPreferences(prefs)
+    }
 
     @Provides
     @Singleton
@@ -109,4 +118,7 @@ object AppModule {
 
     @Provides
     fun provideExclusionRuleDao(db: HumbleDatabase): ExclusionRuleDao = db.exclusionRuleDao()
+
+    @Provides
+    fun provideItemTagDao(db: HumbleDatabase): ItemTagDao = db.itemTagDao()
 }

@@ -1,6 +1,7 @@
 package com.dologan.humblebrowser.download
 
 import android.content.Context
+import android.net.Uri
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
@@ -13,6 +14,7 @@ import dagger.assisted.AssistedInject
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.io.OutputStream
 
 @HiltWorker
 class DownloadWorker @AssistedInject constructor(
@@ -26,16 +28,14 @@ class DownloadWorker @AssistedInject constructor(
     override suspend fun doWork(): Result {
         val fileId = inputData.getString(KEY_FILE_ID) ?: return Result.failure()
         val downloadUrl = inputData.getString(KEY_DOWNLOAD_URL) ?: return Result.failure()
-        val destPath = inputData.getString(KEY_DEST_PATH) ?: return Result.failure()
+        val destPath = inputData.getString(KEY_DEST_PATH)
+        val destUriStr = inputData.getString(KEY_DEST_URI)
+
+        if (destPath == null && destUriStr == null) return Result.failure()
 
         return try {
-            val destFile = File(destPath)
-            destFile.parentFile?.mkdirs()
-
-            // Try downloading with the stored URL first
             var response = executeDownload(downloadUrl)
 
-            // If the URL expired (403 or redirect to login), try to get a fresh one
             if (!response.isSuccessful && (response.code == 403 || response.code == 401)) {
                 response.close()
                 val freshUrl = refreshDownloadUrl(fileId)
@@ -62,20 +62,32 @@ class DownloadWorker @AssistedInject constructor(
             val totalBytes = body.contentLength()
             var downloadedBytes = 0L
 
-            destFile.outputStream().use { output ->
+            // Open output stream — either a file path or a SAF URI
+            val outputStream: OutputStream = if (destPath != null) {
+                val destFile = File(destPath)
+                destFile.parentFile?.mkdirs()
+                destFile.outputStream()
+            } else {
+                val uri = Uri.parse(destUriStr)
+                applicationContext.contentResolver.openOutputStream(uri)
+                    ?: run {
+                        fileDao.setDownloadState(fileId, DownloadState.FAILED)
+                        return Result.failure(workDataOf(KEY_ERROR to "Could not open destination"))
+                    }
+            }
+
+            outputStream.use { output ->
                 body.byteStream().use { input ->
                     val buffer = ByteArray(8192)
                     var bytesRead: Int
                     while (input.read(buffer).also { bytesRead = it } != -1) {
                         if (isStopped) {
-                            output.close()
-                            destFile.delete()
                             fileDao.updateDownloadState(fileId, DownloadState.NONE, null)
+                            destPath?.let { File(it).delete() }
                             return Result.failure(workDataOf(KEY_ERROR to "Cancelled"))
                         }
                         output.write(buffer, 0, bytesRead)
                         downloadedBytes += bytesRead
-
                         if (totalBytes > 0) {
                             val progress = ((downloadedBytes * 100) / totalBytes).toInt()
                             setProgress(workDataOf(KEY_PROGRESS to progress))
@@ -84,16 +96,12 @@ class DownloadWorker @AssistedInject constructor(
                 }
             }
 
+            // For path downloads, persist the local path; for URI downloads, just mark complete
             fileDao.updateDownloadState(fileId, DownloadState.COMPLETE, destPath)
 
-            Result.success(
-                workDataOf(
-                    KEY_FILE_ID to fileId,
-                    KEY_DEST_PATH to destPath,
-                )
-            )
+            Result.success(workDataOf(KEY_FILE_ID to fileId, KEY_DEST_PATH to (destPath ?: "")))
         } catch (e: Exception) {
-            File(destPath).delete()
+            destPath?.let { File(it).delete() }
             fileDao.setDownloadState(fileId, DownloadState.FAILED)
             Result.failure(workDataOf(KEY_ERROR to (e.message ?: "Download failed")))
         }
@@ -104,10 +112,6 @@ class DownloadWorker @AssistedInject constructor(
         return okHttpClient.newCall(request).execute()
     }
 
-    /**
-     * Re-fetch the order to get a fresh download URL for this file.
-     * File IDs are formatted as "orderId:productMachineName:filename".
-     */
     private suspend fun refreshDownloadUrl(fileId: String): String? {
         return try {
             val parts = fileId.split(":", limit = 3)
@@ -122,7 +126,6 @@ class DownloadWorker @AssistedInject constructor(
                         val url = struct.url?.web ?: continue
                         val urlFilename = url.substringAfterLast("/").substringBefore("?")
                         if (urlFilename == filename || struct.name == filename) {
-                            // Update the stored URL for future use
                             fileDao.updateDownloadUrl(fileId, url)
                             return url
                         }
@@ -139,6 +142,7 @@ class DownloadWorker @AssistedInject constructor(
         const val KEY_FILE_ID = "file_id"
         const val KEY_DOWNLOAD_URL = "download_url"
         const val KEY_DEST_PATH = "dest_path"
+        const val KEY_DEST_URI = "dest_uri"
         const val KEY_PROGRESS = "progress"
         const val KEY_ERROR = "error"
     }

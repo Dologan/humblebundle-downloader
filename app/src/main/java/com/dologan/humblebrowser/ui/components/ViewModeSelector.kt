@@ -15,6 +15,7 @@ fun ViewModeSelector(
     onModeSelected: (ViewMode) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // ALPHABETICAL and ALPHABETICAL_DESC both highlight the A-Z button
     val modes = listOf(
         ViewMode.BY_BUNDLE to "By Bundle",
         ViewMode.BY_TYPE to "By Type",
@@ -23,12 +24,30 @@ fun ViewModeSelector(
 
     SingleChoiceSegmentedButtonRow(modifier = modifier.fillMaxWidth()) {
         modes.forEachIndexed { index, (mode, label) ->
+            val isAlphaMode = mode == ViewMode.ALPHABETICAL
+            val isSelected = if (isAlphaMode) {
+                currentMode == ViewMode.ALPHABETICAL || currentMode == ViewMode.ALPHABETICAL_DESC
+            } else {
+                currentMode == mode
+            }
+            val displayLabel = if (isAlphaMode && currentMode == ViewMode.ALPHABETICAL_DESC) "Z-A" else label
+
             SegmentedButton(
                 shape = SegmentedButtonDefaults.itemShape(index = index, count = modes.size),
-                onClick = { onModeSelected(mode) },
-                selected = currentMode == mode,
+                onClick = {
+                    if (isAlphaMode) {
+                        // Toggle between A-Z and Z-A when tapping the same button
+                        onModeSelected(
+                            if (currentMode == ViewMode.ALPHABETICAL) ViewMode.ALPHABETICAL_DESC
+                            else ViewMode.ALPHABETICAL
+                        )
+                    } else {
+                        onModeSelected(mode)
+                    }
+                },
+                selected = isSelected,
             ) {
-                Text(label)
+                Text(displayLabel)
             }
         }
     }

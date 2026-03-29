@@ -22,6 +22,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -36,6 +37,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.dologan.humblebrowser.data.prefs.AppPreferences
+import kotlin.math.roundToLong
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -44,6 +47,8 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val rules by viewModel.exclusionRules.collectAsState()
+    val largeFileSizeBytes by viewModel.largeFileSizeBytes.collectAsState()
+    val largeFileSizeMb = largeFileSizeBytes / (1024 * 1024)
     var showAddDialog by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -69,6 +74,34 @@ fun SettingsScreen(
                 .padding(padding)
                 .padding(horizontal = 16.dp),
         ) {
+            // Download warning threshold
+            item {
+                Text(
+                    text = "Downloads",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(vertical = 16.dp),
+                )
+                Text(
+                    text = "Warn before downloading files larger than: $largeFileSizeMb MB",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Slider(
+                    value = largeFileSizeMb.toFloat(),
+                    onValueChange = { viewModel.setLargeFileSizeMb(it.roundToLong()) },
+                    valueRange = 10f..500f,
+                    steps = 48, // 10 MB steps from 10-500
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                )
+                Text(
+                    text = "Range: 10 MB – 500 MB  (default: ${AppPreferences.DEFAULT_LARGE_FILE_MB} MB)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
             item {
                 Text(
                     text = "Exclusion Rules",

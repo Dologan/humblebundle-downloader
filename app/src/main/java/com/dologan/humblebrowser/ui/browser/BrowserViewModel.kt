@@ -6,10 +6,14 @@ import com.dologan.humblebrowser.data.db.dao.BundleDao
 import com.dologan.humblebrowser.data.db.dao.ExclusionRuleDao
 import com.dologan.humblebrowser.data.db.dao.FileDao
 import com.dologan.humblebrowser.data.db.dao.HiddenPathDao
+import com.dologan.humblebrowser.data.db.dao.ItemTagDao
 import com.dologan.humblebrowser.data.db.dao.ProductDao
 import com.dologan.humblebrowser.data.db.entities.BundleEntity
+import com.dologan.humblebrowser.data.db.entities.DownloadState
+import com.dologan.humblebrowser.data.db.entities.ExclusionRuleEntity
 import com.dologan.humblebrowser.data.db.entities.FileEntity
 import com.dologan.humblebrowser.data.db.entities.HiddenPathEntity
+import com.dologan.humblebrowser.data.db.entities.ItemTagEntity
 import com.dologan.humblebrowser.data.db.entities.ProductEntity
 import com.dologan.humblebrowser.data.prefs.AuthPreferences
 import com.dologan.humblebrowser.data.repository.LibraryRepository
@@ -21,11 +25,19 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+data class LibraryStats(
+    val totalBundles: Int = 0,
+    val totalFiles: Int = 0,
+    val totalLibrarySize: Long = 0L,
+    val downloadedFiles: Int = 0,
+    val downloadedSize: Long = 0L,
+)
 
 data class BrowserUiState(
     val tree: List<TreeNode> = emptyList(),
@@ -35,12 +47,17 @@ data class BrowserUiState(
     val viewMode: ViewMode = ViewMode.BY_BUNDLE,
     val activePlatformFilters: Set<String> = emptySet(),
     val activeExtensionFilters: Set<String> = emptySet(),
+    val activeTagFilters: Set<String> = emptySet(),
     val showHidden: Boolean = false,
     val autoHideEmpty: Boolean = false,
     val downloadedOnly: Boolean = false,
     val hasLibraryData: Boolean = false,
     val availablePlatforms: List<String> = emptyList(),
     val availableExtensions: List<String> = emptyList(),
+    val availableTags: List<String> = emptyList(),
+    val libraryMaxFileSize: Long = 0L,
+    val sizeFilterMin: Long = 0L,
+    val sizeFilterMax: Long = Long.MAX_VALUE,
     val errorMessage: String? = null,
 )
 
@@ -53,6 +70,7 @@ class BrowserViewModel @Inject constructor(
     private val fileDao: FileDao,
     private val hiddenPathDao: HiddenPathDao,
     private val exclusionRuleDao: ExclusionRuleDao,
+    private val itemTagDao: ItemTagDao,
     val downloadManager: DownloadManager,
 ) : ViewModel() {
 
@@ -61,57 +79,89 @@ class BrowserViewModel @Inject constructor(
     private val _viewMode = MutableStateFlow(ViewMode.BY_BUNDLE)
     private val _platformFilters = MutableStateFlow<Set<String>>(emptySet())
     private val _extensionFilters = MutableStateFlow<Set<String>>(emptySet())
+    private val _tagFilters = MutableStateFlow<Set<String>>(emptySet())
     private val _showHidden = MutableStateFlow(false)
     private val _autoHideEmpty = MutableStateFlow(false)
     private val _downloadedOnly = MutableStateFlow(false)
+    private val _sizeFilterMin = MutableStateFlow(0L)
+    private val _sizeFilterMax = MutableStateFlow(Long.MAX_VALUE)
     private val _isSyncing = MutableStateFlow(false)
     private val _errorMessage = MutableStateFlow<String?>(null)
 
-    val uiState: StateFlow<BrowserUiState> = combine(
-        bundleDao.observeAll(),
-        productDao.observeAll(),
-        fileDao.observeAll(),
-        hiddenPathDao.observeAll(),
-        exclusionRuleDao.observeEnabled(),
-    ) { bundles, products, files, hiddenPaths, exclusionRules ->
-        buildUiState(bundles, products, files, hiddenPaths.map { it.path }.toSet(), exclusionRules)
-    }.combine(
+    // DB combine block: core library + user config + tags
+    private val dbStateFlow = combine(
+        combine(bundleDao.observeAll(), productDao.observeAll(), fileDao.observeAll()) { b, p, f ->
+            Triple(b, p, f)
+        },
+        combine(hiddenPathDao.observeAll(), exclusionRuleDao.observeEnabled()) { h, e -> h to e },
+        itemTagDao.observeAll(),
+    ) { (bundles, products, files), (hiddenPaths, exclusionRules), itemTags ->
+        buildDbState(bundles, products, files, hiddenPaths.map { it.path }.toSet(), exclusionRules, itemTags)
+    }
+
+    // Filter toggles: extension + boolean flags + tag filters + size range
+    private val filterStateFlow = combine(
+        _expandedNodes,
+        _searchQuery,
+        _viewMode,
+        _platformFilters,
         combine(
-            _expandedNodes,
-            _searchQuery,
-            _viewMode,
-            _platformFilters,
-            combine(_extensionFilters, _showHidden, _autoHideEmpty, _downloadedOnly) { ext, show, autoHide, dlOnly ->
-                FilterToggles(ext, show, autoHide, dlOnly)
+            combine(_extensionFilters, _showHidden, _autoHideEmpty, _downloadedOnly, _tagFilters) { ext, show, autoHide, dlOnly, tags ->
+                FilterTogglesPartial(ext, show, autoHide, dlOnly, tags)
             },
-        ) { expanded, search, viewMode, platforms, toggles ->
-            FilterState(expanded, search, viewMode, platforms, toggles.extensions, toggles.showHidden, toggles.autoHideEmpty, toggles.downloadedOnly)
-        }
+            combine(_sizeFilterMin, _sizeFilterMax) { minSize, maxSize -> minSize to maxSize },
+        ) { partial, (minSize, maxSize) ->
+            FilterToggles(partial.extensions, partial.showHidden, partial.autoHideEmpty, partial.downloadedOnly, partial.tags, minSize, maxSize)
+        },
+    ) { expanded, search, viewMode, platforms, toggles ->
+        FilterState(expanded, search, viewMode, platforms, toggles)
+    }
+
+    val uiState: StateFlow<BrowserUiState> = combine(
+        dbStateFlow,
+        filterStateFlow,
     ) { dbState, filterState ->
         dbState.copy(
             searchQuery = filterState.search,
             viewMode = filterState.viewMode,
             activePlatformFilters = filterState.platforms,
-            activeExtensionFilters = filterState.extensions,
-            showHidden = filterState.showHidden,
-            autoHideEmpty = filterState.autoHideEmpty,
-            downloadedOnly = filterState.downloadedOnly,
-        ).let { state ->
-            state.copy(tree = buildTree(state, filterState))
-        }
+            activeExtensionFilters = filterState.toggles.extensions,
+            activeTagFilters = filterState.toggles.tags,
+            showHidden = filterState.toggles.showHidden,
+            autoHideEmpty = filterState.toggles.autoHideEmpty,
+            downloadedOnly = filterState.toggles.downloadedOnly,
+            sizeFilterMin = filterState.toggles.sizeMin,
+            sizeFilterMax = filterState.toggles.sizeMax,
+        ).let { state -> state.copy(tree = buildTree(state, filterState)) }
     }.combine(
-        combine(_isSyncing, _errorMessage) { syncing, error ->
-            syncing to error
-        }
+        combine(_isSyncing, _errorMessage) { syncing, error -> syncing to error }
     ) { state, (syncing, error) ->
-        state.copy(
-            isSyncing = syncing,
-            errorMessage = error,
-        )
+        state.copy(isSyncing = syncing, errorMessage = error)
     }.stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5000),
         BrowserUiState(isLoading = true),
+    )
+
+    val libraryStats: StateFlow<LibraryStats> = combine(
+        bundleDao.observeAll(),
+        fileDao.observeAll(),
+    ) { bundles, files ->
+        LibraryStats(
+            totalBundles = bundles.size,
+            totalFiles = files.size,
+            totalLibrarySize = files.sumOf { it.fileSize },
+            downloadedFiles = files.count { it.downloadState == DownloadState.COMPLETE },
+            downloadedSize = files.filter { it.downloadState == DownloadState.COMPLETE }.sumOf { it.fileSize },
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), LibraryStats())
+
+    private data class FilterTogglesPartial(
+        val extensions: Set<String>,
+        val showHidden: Boolean,
+        val autoHideEmpty: Boolean,
+        val downloadedOnly: Boolean,
+        val tags: Set<String>,
     )
 
     private data class FilterToggles(
@@ -119,6 +169,9 @@ class BrowserViewModel @Inject constructor(
         val showHidden: Boolean,
         val autoHideEmpty: Boolean,
         val downloadedOnly: Boolean,
+        val tags: Set<String>,
+        val sizeMin: Long,
+        val sizeMax: Long,
     )
 
     private data class FilterState(
@@ -126,10 +179,7 @@ class BrowserViewModel @Inject constructor(
         val search: String,
         val viewMode: ViewMode,
         val platforms: Set<String>,
-        val extensions: Set<String>,
-        val showHidden: Boolean,
-        val autoHideEmpty: Boolean,
-        val downloadedOnly: Boolean,
+        val toggles: FilterToggles,
     )
 
     // Cached data references for tree building
@@ -138,39 +188,52 @@ class BrowserViewModel @Inject constructor(
     private var cachedFiles: List<FileEntity> = emptyList()
     private var cachedHiddenPaths: Set<String> = emptySet()
     private var cachedExclusionMatcher: ExclusionMatcher = ExclusionMatcher(emptyList())
+    // path -> set of tags on that path
+    private var cachedTagMap: Map<String, Set<String>> = emptyMap()
 
-    private fun buildUiState(
+    private fun buildDbState(
         bundles: List<BundleEntity>,
         products: List<ProductEntity>,
         files: List<FileEntity>,
         hiddenPaths: Set<String>,
-        exclusionRules: List<com.dologan.humblebrowser.data.db.entities.ExclusionRuleEntity>,
+        exclusionRules: List<ExclusionRuleEntity>,
+        itemTags: List<ItemTagEntity>,
     ): BrowserUiState {
         cachedBundles = bundles
         cachedProducts = products
         cachedFiles = files
         cachedHiddenPaths = hiddenPaths
         cachedExclusionMatcher = ExclusionMatcher(exclusionRules)
+        cachedTagMap = itemTags.groupBy({ it.path }, { it.tag })
+            .mapValues { (_, tags) -> tags.toSet() }
+
+        val allTags = itemTags.map { it.tag }.distinct().sortedWith(
+            compareBy { if (it == FAVES_TAG) "" else it }
+        )
 
         return BrowserUiState(
             hasLibraryData = bundles.isNotEmpty(),
             availablePlatforms = files.map { it.platform }.distinct().sorted(),
             availableExtensions = files.mapNotNull { extractExtension(it.filename) }.distinct().sorted(),
+            availableTags = allTags,
+            libraryMaxFileSize = files.maxOfOrNull { it.fileSize } ?: 0L,
         )
     }
 
     private fun buildTree(state: BrowserUiState, filterState: FilterState): List<TreeNode> {
         val searchActive = filterState.search.isNotBlank()
+        val t = filterState.toggles
+        val hasActiveFilters = searchActive || t.downloadedOnly || t.tags.isNotEmpty() ||
+            t.sizeMin > 0L || t.sizeMax < Long.MAX_VALUE
+
         val filteredFiles = cachedFiles.filter { file ->
             val platformOk = filterState.platforms.isEmpty() || file.platform in filterState.platforms
-            val extOk = filterState.extensions.isEmpty() ||
-                extractExtension(file.filename) in filterState.extensions
-            val searchOk = !searchActive ||
-                file.filename.contains(filterState.search, ignoreCase = true)
-            val downloadedOk = !filterState.downloadedOnly ||
-                file.downloadState == com.dologan.humblebrowser.data.db.entities.DownloadState.COMPLETE
-
-            platformOk && extOk && searchOk && downloadedOk
+            val extOk = t.extensions.isEmpty() || extractExtension(file.filename) in t.extensions
+            val searchOk = !searchActive || file.filename.contains(filterState.search, ignoreCase = true)
+            val downloadedOk = !t.downloadedOnly || file.downloadState == DownloadState.COMPLETE
+            val sizeOk = file.fileSize in t.sizeMin..t.sizeMax
+            val tagOk = t.tags.isEmpty() || fileMatchesTags(file, t.tags)
+            platformOk && extOk && searchOk && downloadedOk && sizeOk && tagOk
         }
 
         val productFileMap = filteredFiles.groupBy { it.productId }
@@ -178,16 +241,25 @@ class BrowserViewModel @Inject constructor(
         val bundleMap = cachedBundles.associateBy { it.orderId }
 
         return when (filterState.viewMode) {
-            ViewMode.BY_BUNDLE -> buildByBundleTree(
-                bundleMap, productMap, productFileMap, filterState.expanded, filterState,
-            )
-            ViewMode.BY_TYPE -> buildByTypeTree(
-                bundleMap, productMap, productFileMap, filteredFiles, filterState.expanded,
-            )
-            ViewMode.ALPHABETICAL -> buildAlphabeticalTree(
-                bundleMap, productMap, productFileMap, filterState.expanded, filterState,
-            )
+            ViewMode.BY_BUNDLE -> buildByBundleTree(bundleMap, productMap, productFileMap, filterState.expanded, filterState.toggles, hasActiveFilters)
+            ViewMode.BY_TYPE -> buildByTypeTree(bundleMap, productMap, productFileMap, filteredFiles, filterState.expanded)
+            ViewMode.ALPHABETICAL -> buildAlphabeticalTree(bundleMap, productMap, productFileMap, filterState.expanded, filterState.toggles, ascending = true)
+            ViewMode.ALPHABETICAL_DESC -> buildAlphabeticalTree(bundleMap, productMap, productFileMap, filterState.expanded, filterState.toggles, ascending = false)
         }
+    }
+
+    /** Check if a file (or its parents) has all required tags. */
+    private fun fileMatchesTags(file: FileEntity, requiredTags: Set<String>): Boolean {
+        val product = cachedProducts.find { it.id == file.productId } ?: return false
+        val bundle = cachedBundles.find { it.orderId == product.orderId } ?: return false
+        val filePath = "${bundle.bundleName}/${product.humanName}/${file.filename}"
+        val productPath = "${bundle.bundleName}/${product.humanName}"
+        val bundlePath = bundle.bundleName
+
+        val allTagsForItem = (cachedTagMap[filePath] ?: emptySet()) +
+            (cachedTagMap[productPath] ?: emptySet()) +
+            (cachedTagMap[bundlePath] ?: emptySet())
+        return requiredTags.any { it in allTagsForItem }
     }
 
     private fun buildByBundleTree(
@@ -195,33 +267,31 @@ class BrowserViewModel @Inject constructor(
         productMap: Map<String, ProductEntity>,
         productFileMap: Map<String, List<FileEntity>>,
         expanded: Set<String>,
-        filterState: FilterState,
+        toggles: FilterToggles,
+        hasActiveFilters: Boolean,
     ): List<TreeNode> {
         val nodes = mutableListOf<TreeNode>()
         val bundleProducts = cachedProducts.groupBy { it.orderId }
-        val hasActiveFilters = filterState.search.isNotBlank() || filterState.downloadedOnly
 
         for (bundle in cachedBundles) {
             val bundlePath = bundle.bundleName
             val isHidden = bundlePath in cachedHiddenPaths
-            if (isHidden && !filterState.showHidden) continue
+            if (isHidden && !toggles.showHidden) continue
             if (cachedExclusionMatcher.isExcluded(bundlePath)) continue
 
             val products = bundleProducts[bundle.orderId] ?: emptyList()
             val visibleProducts = products.filter { p ->
                 val pPath = "$bundlePath/${p.humanName}"
                 val pHidden = pPath in cachedHiddenPaths
-                if (pHidden && !filterState.showHidden) return@filter false
+                if (pHidden && !toggles.showHidden) return@filter false
                 if (cachedExclusionMatcher.isExcluded(pPath)) return@filter false
                 if (productFileMap[p.id]?.isEmpty() != false) {
-                    // Hide products with no matching files when any filter is active
-                    if (filterState.autoHideEmpty || hasActiveFilters) return@filter false
+                    if (toggles.autoHideEmpty || hasActiveFilters) return@filter false
                 }
                 true
             }
 
-            // Hide empty bundles when auto-hide is on or any filter is active
-            if (visibleProducts.isEmpty() && (filterState.autoHideEmpty || hasActiveFilters)) continue
+            if (visibleProducts.isEmpty() && (toggles.autoHideEmpty || hasActiveFilters)) continue
 
             nodes.add(
                 TreeNode.GroupNode(
@@ -232,6 +302,7 @@ class BrowserViewModel @Inject constructor(
                     expanded = bundle.orderId in expanded,
                     childCount = visibleProducts.size,
                     isHidden = isHidden,
+                    tags = cachedTagMap[bundlePath] ?: emptySet(),
                 )
             )
 
@@ -251,16 +322,19 @@ class BrowserViewModel @Inject constructor(
                             expanded = product.id in expanded,
                             childCount = visibleFiles.size,
                             isHidden = pHidden,
+                            tags = cachedTagMap[productPath] ?: emptySet(),
                         )
                     )
 
                     if (product.id in expanded) {
                         for (file in visibleFiles) {
+                            val filePath = "$productPath/${file.filename}"
                             nodes.add(
                                 TreeNode.FileNode(
                                     file = file,
                                     bundleName = bundle.bundleName,
                                     productName = product.humanName,
+                                    tags = cachedTagMap[filePath] ?: emptySet(),
                                 )
                             )
                         }
@@ -334,19 +408,23 @@ class BrowserViewModel @Inject constructor(
         productMap: Map<String, ProductEntity>,
         productFileMap: Map<String, List<FileEntity>>,
         expanded: Set<String>,
-        filterState: FilterState,
+        toggles: FilterToggles,
+        ascending: Boolean,
     ): List<TreeNode> {
         val nodes = mutableListOf<TreeNode>()
-        val sortedProducts = cachedProducts
+        val sorted = cachedProducts
             .filter { productFileMap.containsKey(it.id) }
-            .sortedBy { it.humanName.lowercase() }
+            .let { list ->
+                if (ascending) list.sortedBy { it.humanName.lowercase() }
+                else list.sortedByDescending { it.humanName.lowercase() }
+            }
 
-        for (product in sortedProducts) {
+        for (product in sorted) {
             val bundle = bundleMap[product.orderId]
             val bundleName = bundle?.bundleName ?: "Unknown"
             val productPath = "$bundleName/${product.humanName}"
             val isHidden = productPath in cachedHiddenPaths
-            if (isHidden && !filterState.showHidden) continue
+            if (isHidden && !toggles.showHidden) continue
 
             val files = productFileMap[product.id] ?: emptyList()
 
@@ -357,16 +435,19 @@ class BrowserViewModel @Inject constructor(
                     expanded = product.id in expanded,
                     childCount = files.size,
                     isHidden = isHidden,
+                    tags = cachedTagMap[productPath] ?: emptySet(),
                 )
             )
 
             if (product.id in expanded) {
                 for (file in files) {
+                    val filePath = "$productPath/${file.filename}"
                     nodes.add(
                         TreeNode.FileNode(
                             file = file,
                             bundleName = bundleName,
                             productName = product.humanName,
+                            tags = cachedTagMap[filePath] ?: emptySet(),
                         )
                     )
                 }
@@ -375,19 +456,19 @@ class BrowserViewModel @Inject constructor(
         return nodes
     }
 
+    // ── Actions ──────────────────────────────────────────────────────────────
+
     fun toggleExpanded(key: String) {
         _expandedNodes.value = _expandedNodes.value.let {
             if (key in it) it - key else it + key
         }
     }
 
-    fun setSearchQuery(query: String) {
-        _searchQuery.value = query
-    }
+    fun setSearchQuery(query: String) { _searchQuery.value = query }
 
     fun setViewMode(mode: ViewMode) {
         _viewMode.value = mode
-        _expandedNodes.value = emptySet() // collapse all on mode switch
+        _expandedNodes.value = emptySet()
     }
 
     fun togglePlatformFilter(platform: String) {
@@ -402,45 +483,67 @@ class BrowserViewModel @Inject constructor(
         }
     }
 
-    fun toggleShowHidden() {
-        _showHidden.value = !_showHidden.value
+    fun toggleTagFilter(tag: String) {
+        _tagFilters.value = _tagFilters.value.let {
+            if (tag in it) it - tag else it + tag
+        }
     }
 
-    fun toggleAutoHideEmpty() {
-        _autoHideEmpty.value = !_autoHideEmpty.value
+    fun addTagToPath(path: String, tag: String) {
+        viewModelScope.launch {
+            itemTagDao.addTag(ItemTagEntity(path = path, tag = tag.trim()))
+        }
     }
 
-    fun toggleDownloadedOnly() {
-        _downloadedOnly.value = !_downloadedOnly.value
+    fun removeTagFromPath(path: String, tag: String) {
+        viewModelScope.launch {
+            itemTagDao.removeTag(path, tag)
+        }
+    }
+
+    fun toggleShowHidden() { _showHidden.value = !_showHidden.value }
+    fun toggleAutoHideEmpty() { _autoHideEmpty.value = !_autoHideEmpty.value }
+    fun toggleDownloadedOnly() { _downloadedOnly.value = !_downloadedOnly.value }
+
+    fun setSizeFilter(min: Long, max: Long) {
+        _sizeFilterMin.value = min
+        _sizeFilterMax.value = max
+    }
+
+    fun resetSizeFilter() {
+        _sizeFilterMin.value = 0L
+        _sizeFilterMax.value = Long.MAX_VALUE
     }
 
     fun hidePath(path: String) {
-        viewModelScope.launch {
-            hiddenPathDao.hide(HiddenPathEntity(path = path))
-        }
+        viewModelScope.launch { hiddenPathDao.hide(HiddenPathEntity(path = path)) }
     }
 
     fun unhidePath(path: String) {
-        viewModelScope.launch {
-            hiddenPathDao.unhide(path)
-        }
+        viewModelScope.launch { hiddenPathDao.unhide(path) }
     }
 
     fun sync(forceRefresh: Boolean = false) {
-        if (!authPreferences.isLoggedIn()) return // nothing to sync without a session
+        if (!authPreferences.isLoggedIn()) return
         viewModelScope.launch {
             _isSyncing.value = true
             _errorMessage.value = null
-            val result = libraryRepository.syncLibrary(forceRefresh)
-            result.onFailure { e ->
+            libraryRepository.syncLibrary(forceRefresh).onFailure { e ->
                 _errorMessage.value = e.message ?: "Sync failed"
             }
             _isSyncing.value = false
         }
     }
 
+    fun clearAllDownloads() {
+        viewModelScope.launch {
+            cachedFiles.filter { it.downloadState == DownloadState.COMPLETE }.forEach { file ->
+                file.localPath?.let { downloadManager.deleteDownload(file.id, it) }
+            }
+        }
+    }
+
     init {
-        // Surface download errors as snackbar messages
         viewModelScope.launch {
             downloadManager.downloadErrors.collect { error ->
                 _errorMessage.value = error
@@ -459,28 +562,35 @@ class BrowserViewModel @Inject constructor(
         }
     }
 
-    fun cancelDownload(fileId: String) {
+    fun downloadFileTo(file: FileEntity, destUri: android.net.Uri) {
         viewModelScope.launch {
-            downloadManager.cancelDownload(fileId)
+            try {
+                val workId = downloadManager.enqueueDownloadToUri(file, destUri)
+                downloadManager.observeDownload(viewModelScope, workId, file.filename)
+            } catch (e: Exception) {
+                _errorMessage.value = "Failed to start download: ${e.message}"
+            }
         }
     }
 
+    fun cancelDownload(fileId: String) {
+        viewModelScope.launch { downloadManager.cancelDownload(fileId) }
+    }
+
     fun deleteDownload(fileId: String, localPath: String) {
-        viewModelScope.launch {
-            downloadManager.deleteDownload(fileId, localPath)
-        }
+        viewModelScope.launch { downloadManager.deleteDownload(fileId, localPath) }
     }
 
     fun isLargeFile(file: FileEntity): Boolean = downloadManager.isLargeFile(file)
 
-    fun dismissError() {
-        _errorMessage.value = null
-    }
+    fun dismissError() { _errorMessage.value = null }
 
     private fun extractExtension(filename: String): String? {
         val dot = filename.lastIndexOf('.')
-        return if (dot > 0 && dot < filename.length - 1) {
-            filename.substring(dot + 1).lowercase()
-        } else null
+        return if (dot > 0 && dot < filename.length - 1) filename.substring(dot + 1).lowercase() else null
+    }
+
+    companion object {
+        const val FAVES_TAG = "Faves"
     }
 }

@@ -2,7 +2,10 @@ package com.dologan.humblebrowser.ui.browser
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,6 +22,9 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.ChipDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -37,8 +43,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dologan.humblebrowser.data.db.entities.DownloadState
 import com.dologan.humblebrowser.domain.model.TreeNode
+import com.dologan.humblebrowser.ui.browser.BrowserViewModel
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun TreeNodeRow(
     node: TreeNode,
@@ -46,15 +53,22 @@ fun TreeNodeRow(
     onHide: () -> Unit,
     onUnhide: () -> Unit,
     onDownload: () -> Unit,
+    onDownloadTo: () -> Unit = {},
     onOpen: () -> Unit,
     onShare: () -> Unit,
     onDelete: () -> Unit = {},
+    onManageTags: () -> Unit = {},
 ) {
     var showContextMenu by remember { mutableStateOf(false) }
     val isHidden = when (node) {
         is TreeNode.GroupNode -> node.isHidden
         is TreeNode.ProductNode -> node.isHidden
         is TreeNode.FileNode -> false
+    }
+    val tags = when (node) {
+        is TreeNode.GroupNode -> node.tags
+        is TreeNode.ProductNode -> node.tags
+        is TreeNode.FileNode -> node.tags
     }
 
     Row(
@@ -65,23 +79,16 @@ fun TreeNodeRow(
                     when (node) {
                         is TreeNode.GroupNode -> onToggleExpand()
                         is TreeNode.ProductNode -> onToggleExpand()
-                        is TreeNode.FileNode -> {
-                            when (node.file.downloadState) {
-                                DownloadState.COMPLETE -> onOpen()
-                                DownloadState.DOWNLOADING -> onDownload() // triggers cancel
-                                else -> showContextMenu = true
-                            }
+                        is TreeNode.FileNode -> when (node.file.downloadState) {
+                            DownloadState.COMPLETE -> onOpen()
+                            DownloadState.DOWNLOADING -> onDownload()
+                            else -> showContextMenu = true
                         }
                     }
                 },
                 onLongClick = { showContextMenu = true },
             )
-            .padding(
-                start = (16 + node.depth * 24).dp,
-                end = 16.dp,
-                top = 8.dp,
-                bottom = 8.dp,
-            )
+            .padding(start = (16 + node.depth * 24).dp, end = 16.dp, top = 8.dp, bottom = 8.dp)
             .alpha(if (isHidden) 0.5f else 1f),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -89,8 +96,7 @@ fun TreeNodeRow(
         when (node) {
             is TreeNode.GroupNode -> {
                 Icon(
-                    imageVector = if (node.expanded) Icons.Default.KeyboardArrowDown
-                    else Icons.Default.KeyboardArrowRight,
+                    imageVector = if (node.expanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowRight,
                     contentDescription = null,
                     modifier = Modifier.size(20.dp),
                 )
@@ -104,8 +110,7 @@ fun TreeNodeRow(
             }
             is TreeNode.ProductNode -> {
                 Icon(
-                    imageVector = if (node.expanded) Icons.Default.KeyboardArrowDown
-                    else Icons.Default.KeyboardArrowRight,
+                    imageVector = if (node.expanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowRight,
                     contentDescription = null,
                     modifier = Modifier.size(20.dp),
                 )
@@ -130,7 +135,6 @@ fun TreeNodeRow(
 
         Spacer(modifier = Modifier.width(8.dp))
 
-        // Name and metadata
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = when (node) {
@@ -147,38 +151,45 @@ fun TreeNodeRow(
             )
 
             when (node) {
-                is TreeNode.GroupNode -> {
-                    Text(
-                        text = "${node.childCount} items",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                is TreeNode.ProductNode -> {
-                    Text(
-                        text = "${node.childCount} files",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                is TreeNode.FileNode -> {
-                    val sizeText = formatFileSize(node.file.fileSize)
-                    val platformText = node.file.platform
-                    Text(
-                        text = "$platformText · $sizeText",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                is TreeNode.GroupNode -> Text(
+                    "${node.childCount} items",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                is TreeNode.ProductNode -> Text(
+                    "${node.childCount} files",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                is TreeNode.FileNode -> Text(
+                    "${node.file.platform} · ${formatFileSize(node.file.fileSize)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
-            // Download progress
             if (node is TreeNode.FileNode && node.file.downloadState == DownloadState.DOWNLOADING) {
-                LinearProgressIndicator(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 4.dp),
-                )
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+            }
+
+            // Tags row
+            if (tags.isNotEmpty()) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.padding(top = 2.dp),
+                ) {
+                    val sorted = tags.sortedWith(compareBy { if (it == BrowserViewModel.FAVES_TAG) "" else it })
+                    sorted.forEach { tag ->
+                        AssistChip(
+                            onClick = {},
+                            label = { Text(tag, style = MaterialTheme.typography.labelSmall) },
+                            leadingIcon = if (tag == BrowserViewModel.FAVES_TAG) {
+                                { Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(ChipDefaults.SmallIconSize)) }
+                            } else null,
+                            modifier = Modifier.size(height = 24.dp, width = if (tag == BrowserViewModel.FAVES_TAG) 72.dp else 60.dp),
+                        )
+                    }
+                }
             }
         }
 
@@ -195,95 +206,34 @@ fun TreeNodeRow(
                 DownloadState.FAILED -> MaterialTheme.colorScheme.error
                 else -> MaterialTheme.colorScheme.onSurfaceVariant
             }
-            Icon(
-                imageVector = icon,
-                contentDescription = node.file.downloadState,
-                modifier = Modifier.size(20.dp),
-                tint = tint,
-            )
+            Icon(imageVector = icon, contentDescription = node.file.downloadState, modifier = Modifier.size(20.dp), tint = tint)
         }
 
         // Context menu
-        DropdownMenu(
-            expanded = showContextMenu,
-            onDismissRequest = { showContextMenu = false },
-        ) {
+        DropdownMenu(expanded = showContextMenu, onDismissRequest = { showContextMenu = false }) {
             if (isHidden) {
-                DropdownMenuItem(
-                    text = { Text("Unhide") },
-                    onClick = {
-                        showContextMenu = false
-                        onUnhide()
-                    },
-                )
+                DropdownMenuItem(text = { Text("Unhide") }, onClick = { showContextMenu = false; onUnhide() })
             } else if (node !is TreeNode.FileNode) {
-                DropdownMenuItem(
-                    text = { Text("Download All") },
-                    onClick = {
-                        showContextMenu = false
-                        onDownload()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("Hide") },
-                    onClick = {
-                        showContextMenu = false
-                        onHide()
-                    },
-                )
+                DropdownMenuItem(text = { Text("Download All") }, onClick = { showContextMenu = false; onDownload() })
+                DropdownMenuItem(text = { Text("Hide") }, onClick = { showContextMenu = false; onHide() })
             }
             if (node is TreeNode.FileNode) {
-                if (node.file.downloadState == DownloadState.NONE ||
-                    node.file.downloadState == DownloadState.FAILED
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Download") },
-                        onClick = {
-                            showContextMenu = false
-                            onDownload()
-                        },
-                    )
+                if (node.file.downloadState == DownloadState.NONE || node.file.downloadState == DownloadState.FAILED) {
+                    DropdownMenuItem(text = { Text("Download") }, onClick = { showContextMenu = false; onDownload() })
+                    DropdownMenuItem(text = { Text("Download To…") }, onClick = { showContextMenu = false; onDownloadTo() })
                 }
                 if (node.file.downloadState == DownloadState.DOWNLOADING) {
-                    DropdownMenuItem(
-                        text = { Text("Cancel Download") },
-                        onClick = {
-                            showContextMenu = false
-                            onDownload()
-                        },
-                    )
+                    DropdownMenuItem(text = { Text("Cancel Download") }, onClick = { showContextMenu = false; onDownload() })
                 }
                 if (node.file.downloadState == DownloadState.COMPLETE) {
-                    DropdownMenuItem(
-                        text = { Text("Open") },
-                        onClick = {
-                            showContextMenu = false
-                            onOpen()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Share") },
-                        onClick = {
-                            showContextMenu = false
-                            onShare()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Delete") },
-                        onClick = {
-                            showContextMenu = false
-                            onDelete()
-                        },
-                    )
+                    DropdownMenuItem(text = { Text("Open") }, onClick = { showContextMenu = false; onOpen() })
+                    DropdownMenuItem(text = { Text("Share") }, onClick = { showContextMenu = false; onShare() })
+                    DropdownMenuItem(text = { Text("Download To…") }, onClick = { showContextMenu = false; onDownloadTo() })
+                    DropdownMenuItem(text = { Text("Delete") }, onClick = { showContextMenu = false; onDelete() })
                 }
-                DropdownMenuItem(
-                    text = { Text("Hide") },
-                    onClick = {
-                        showContextMenu = false
-                        onHide()
-                    },
-                )
+                DropdownMenuItem(text = { Text("Hide") }, onClick = { showContextMenu = false; onHide() })
             }
+            DropdownMenuItem(text = { Text("Manage Tags…") }, onClick = { showContextMenu = false; onManageTags() })
         }
     }
 }
@@ -293,9 +243,6 @@ private fun formatFileSize(bytes: Long): String {
     val units = arrayOf("B", "KB", "MB", "GB", "TB")
     var size = bytes.toDouble()
     var unitIndex = 0
-    while (size >= 1024 && unitIndex < units.size - 1) {
-        size /= 1024
-        unitIndex++
-    }
+    while (size >= 1024 && unitIndex < units.size - 1) { size /= 1024; unitIndex++ }
     return "%.1f %s".format(size, units[unitIndex])
 }

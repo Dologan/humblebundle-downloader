@@ -17,6 +17,7 @@ sealed class TreeNode {
         val expanded: Boolean,
         val childCount: Int = 0,
         val isHidden: Boolean = false,
+        val tags: Set<String> = emptySet(),
     ) : TreeNode()
 
     data class ProductNode(
@@ -25,6 +26,7 @@ sealed class TreeNode {
         val expanded: Boolean,
         val childCount: Int = 0,
         val isHidden: Boolean = false,
+        val tags: Set<String> = emptySet(),
     ) : TreeNode() {
         override val key: String get() = product.id
         override val depth: Int get() = 1
@@ -35,6 +37,7 @@ sealed class TreeNode {
         val file: FileEntity,
         val bundleName: String,
         val productName: String,
+        val tags: Set<String> = emptySet(),
     ) : TreeNode() {
         override val key: String get() = file.id
         override val depth: Int get() = 2
@@ -46,4 +49,5 @@ enum class ViewMode {
     BY_BUNDLE,
     BY_TYPE,
     ALPHABETICAL,
+    ALPHABETICAL_DESC,
 }
