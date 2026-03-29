@@ -191,10 +191,14 @@ fun BrowserScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    if (state.searchQuery.isNotBlank()) {
+                    if (state.hasLibraryData) {
+                        // Library is loaded but active filters/search gave no results
                         Text(
-                            text = "No results found",
+                            text = "No results match the current filters.",
                             style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(32.dp),
                         )
                     } else {
                         Column(

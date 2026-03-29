@@ -38,6 +38,7 @@ data class BrowserUiState(
     val showHidden: Boolean = false,
     val autoHideEmpty: Boolean = false,
     val downloadedOnly: Boolean = false,
+    val hasLibraryData: Boolean = false,
     val availablePlatforms: List<String> = emptyList(),
     val availableExtensions: List<String> = emptyList(),
     val errorMessage: String? = null,
@@ -152,6 +153,7 @@ class BrowserViewModel @Inject constructor(
         cachedExclusionMatcher = ExclusionMatcher(exclusionRules)
 
         return BrowserUiState(
+            hasLibraryData = bundles.isNotEmpty(),
             availablePlatforms = files.map { it.platform }.distinct().sorted(),
             availableExtensions = files.mapNotNull { extractExtension(it.filename) }.distinct().sorted(),
         )

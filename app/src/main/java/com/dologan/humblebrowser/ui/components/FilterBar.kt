@@ -56,7 +56,7 @@ fun FilterBar(
                 modifier = Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                extensions.take(20).forEach { ext ->
+                extensions.forEach { ext ->
                     FilterChip(
                         selected = ext in activeExtensions,
                         onClick = { onToggleExtension(ext) },
