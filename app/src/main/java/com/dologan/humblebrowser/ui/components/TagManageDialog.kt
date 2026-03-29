@@ -15,7 +15,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.ChipDefaults
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -67,14 +67,14 @@ fun TagManageDialog(
                                 onClick = {},
                                 label = { Text(tag) },
                                 leadingIcon = if (tag == BrowserViewModel.FAVES_TAG) {
-                                    { Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(ChipDefaults.IconSize)) }
+                                    { Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize)) }
                                 } else null,
                                 trailingIcon = {
                                     IconButton(
                                         onClick = { onRemoveTag(tag) },
-                                        modifier = Modifier.size(ChipDefaults.IconSize),
+                                        modifier = Modifier.size(AssistChipDefaults.IconSize),
                                     ) {
-                                        Icon(Icons.Default.Close, contentDescription = "Remove $tag", modifier = Modifier.size(ChipDefaults.IconSize))
+                                        Icon(Icons.Default.Close, contentDescription = "Remove $tag", modifier = Modifier.size(AssistChipDefaults.IconSize))
                                     }
                                 },
                             )

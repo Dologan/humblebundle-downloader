@@ -134,14 +134,14 @@ fun BrowserScreen(
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text(if (state.autoHideEmpty) "Show Empty Folders" else "Auto-hide Empty Folders") },
+                            text = { Text(if (state.autoHideEmpty) "Show Empty Folders" else "Hide Empty Folders") },
                             onClick = {
                                 viewModel.toggleAutoHideEmpty()
                                 showMenu = false
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text(if (state.downloadedOnly) "Show All Items" else "Downloaded Only") },
+                            text = { Text(if (state.downloadedOnly) "Show All Items" else "Show Downloaded Only") },
                             onClick = {
                                 viewModel.toggleDownloadedOnly()
                                 showMenu = false

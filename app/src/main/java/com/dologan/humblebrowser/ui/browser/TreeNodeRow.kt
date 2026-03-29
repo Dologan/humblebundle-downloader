@@ -24,7 +24,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.ChipDefaults
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -184,7 +184,7 @@ fun TreeNodeRow(
                             onClick = {},
                             label = { Text(tag, style = MaterialTheme.typography.labelSmall) },
                             leadingIcon = if (tag == BrowserViewModel.FAVES_TAG) {
-                                { Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(ChipDefaults.SmallIconSize)) }
+                                { Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize)) }
                             } else null,
                             modifier = Modifier.size(height = 24.dp, width = if (tag == BrowserViewModel.FAVES_TAG) 72.dp else 60.dp),
                         )
