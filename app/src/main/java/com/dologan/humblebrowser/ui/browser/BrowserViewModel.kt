@@ -197,7 +197,7 @@ class BrowserViewModel @Inject constructor(
     ): List<TreeNode> {
         val nodes = mutableListOf<TreeNode>()
         val bundleProducts = cachedProducts.groupBy { it.orderId }
-        val searchActive = filterState.search.isNotBlank()
+        val hasActiveFilters = filterState.search.isNotBlank() || filterState.downloadedOnly
 
         for (bundle in cachedBundles) {
             val bundlePath = bundle.bundleName
@@ -212,14 +212,14 @@ class BrowserViewModel @Inject constructor(
                 if (pHidden && !filterState.showHidden) return@filter false
                 if (cachedExclusionMatcher.isExcluded(pPath)) return@filter false
                 if (productFileMap[p.id]?.isEmpty() != false) {
-                    // Hide products with no matching files when auto-hide or search is active
-                    if (filterState.autoHideEmpty || searchActive) return@filter false
+                    // Hide products with no matching files when any filter is active
+                    if (filterState.autoHideEmpty || hasActiveFilters) return@filter false
                 }
                 true
             }
 
-            // Hide empty bundles when auto-hide is on or search is active
-            if (visibleProducts.isEmpty() && (filterState.autoHideEmpty || searchActive)) continue
+            // Hide empty bundles when auto-hide is on or any filter is active
+            if (visibleProducts.isEmpty() && (filterState.autoHideEmpty || hasActiveFilters)) continue
 
             nodes.add(
                 TreeNode.GroupNode(
@@ -460,6 +460,12 @@ class BrowserViewModel @Inject constructor(
     fun cancelDownload(fileId: String) {
         viewModelScope.launch {
             downloadManager.cancelDownload(fileId)
+        }
+    }
+
+    fun deleteDownload(fileId: String, localPath: String) {
+        viewModelScope.launch {
+            downloadManager.deleteDownload(fileId, localPath)
         }
     }
 

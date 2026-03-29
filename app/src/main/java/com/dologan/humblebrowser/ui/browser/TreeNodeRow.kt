@@ -48,6 +48,7 @@ fun TreeNodeRow(
     onDownload: () -> Unit,
     onOpen: () -> Unit,
     onShare: () -> Unit,
+    onDelete: () -> Unit = {},
 ) {
     var showContextMenu by remember { mutableStateOf(false) }
     val isHidden = when (node) {
@@ -265,6 +266,13 @@ fun TreeNodeRow(
                         onClick = {
                             showContextMenu = false
                             onShare()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Delete") },
+                        onClick = {
+                            showContextMenu = false
+                            onDelete()
                         },
                     )
                 }

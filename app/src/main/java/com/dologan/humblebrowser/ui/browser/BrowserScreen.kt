@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.AccountCircle
@@ -51,6 +52,7 @@ import com.dologan.humblebrowser.ui.components.FilterBar
 import com.dologan.humblebrowser.ui.components.LargeFileConfirmDialog
 import com.dologan.humblebrowser.ui.components.SearchBar
 import com.dologan.humblebrowser.ui.components.ViewModeSelector
+import com.dologan.humblebrowser.ui.components.verticalScrollbar
 import com.dologan.humblebrowser.util.FileActions
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -67,6 +69,7 @@ fun BrowserScreen(
     var showMenu by remember { mutableStateOf(false) }
     var showFilters by remember { mutableStateOf(false) }
     var pendingLargeFile by remember { mutableStateOf<Triple<FileEntity, String, String>?>(null) }
+    var pendingDeleteFile by remember { mutableStateOf<FileEntity?>(null) }
     var showFullReloadConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -222,7 +225,13 @@ fun BrowserScreen(
                     }
                 }
             } else {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                val listState = rememberLazyListState()
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScrollbar(listState),
+                ) {
                     items(
                         items = state.tree,
                         key = { it.key },
@@ -254,6 +263,11 @@ fun BrowserScreen(
                                     node.file.localPath?.let { FileActions.shareFile(context, it) }
                                 }
                             },
+                            onDelete = {
+                                if (node is TreeNode.FileNode) {
+                                    pendingDeleteFile = node.file
+                                }
+                            },
                         )
                     }
                 }
@@ -277,6 +291,28 @@ fun BrowserScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showFullReloadConfirm = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
+    // Delete downloaded file confirmation dialog
+    pendingDeleteFile?.let { file ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteFile = null },
+            title = { Text("Delete Downloaded File") },
+            text = { Text("Delete \"${file.filename}\" from local storage? You can re-download it later.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    file.localPath?.let { viewModel.deleteDownload(file.id, it) }
+                    pendingDeleteFile = null
+                }) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteFile = null }) {
                     Text("Cancel")
                 }
             },

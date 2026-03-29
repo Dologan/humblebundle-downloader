@@ -85,6 +85,12 @@ class DownloadManager @Inject constructor(
         fileDao.updateDownloadState(fileId, DownloadState.NONE, null)
     }
 
+    suspend fun deleteDownload(fileId: String, localPath: String) {
+        val file = File(localPath)
+        if (file.exists()) file.delete()
+        fileDao.updateDownloadState(fileId, DownloadState.NONE, null)
+    }
+
     fun isLargeFile(file: FileEntity): Boolean {
         return file.fileSize > LARGE_FILE_THRESHOLD
     }
