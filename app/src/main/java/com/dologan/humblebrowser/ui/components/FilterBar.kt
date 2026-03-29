@@ -100,15 +100,17 @@ fun FilterBar(
         }
 
         // File size range slider — shown only when the library has files with known sizes
+        // Slider caps at 4 GB; dragging to the max means "Any Size" (no upper limit)
         if (libraryMaxFileSize > 0L) {
             Spacer(modifier = Modifier.height(4.dp))
-            val maxMb = (libraryMaxFileSize / (1024 * 1024)).coerceAtLeast(1).toFloat()
-            val currentMinMb = (sizeFilterMin / (1024 * 1024f)).coerceIn(0f, maxMb)
-            val currentMaxMb = if (sizeFilterMax == Long.MAX_VALUE) maxMb
-                               else (sizeFilterMax / (1024f * 1024f)).coerceIn(currentMinMb, maxMb)
+            val sliderMaxMb = ((libraryMaxFileSize / (1024 * 1024)).coerceAtLeast(1))
+                .coerceAtMost(SLIDER_CAP_MB).toFloat()
+            val currentMinMb = (sizeFilterMin / (1024 * 1024f)).coerceIn(0f, sliderMaxMb)
+            val currentMaxMb = if (sizeFilterMax == Long.MAX_VALUE) sliderMaxMb
+                               else (sizeFilterMax / (1024f * 1024f)).coerceIn(currentMinMb, sliderMaxMb)
 
             val minLabel = formatMb(currentMinMb)
-            val maxLabel = if (currentMaxMb >= maxMb) "Any" else formatMb(currentMaxMb)
+            val maxLabel = if (currentMaxMb >= sliderMaxMb) "Any" else formatMb(currentMaxMb)
             Text(
                 text = "File size: $minLabel – $maxLabel",
                 style = MaterialTheme.typography.labelSmall,
@@ -118,11 +120,11 @@ fun FilterBar(
                 value = currentMinMb..currentMaxMb,
                 onValueChange = { range ->
                     val newMin = (range.start * 1024 * 1024).roundToLong()
-                    val newMax = if (range.endInclusive >= maxMb) Long.MAX_VALUE
+                    val newMax = if (range.endInclusive >= sliderMaxMb) Long.MAX_VALUE
                                  else (range.endInclusive * 1024 * 1024).roundToLong()
                     onSizeFilterChange(newMin, newMax)
                 },
-                valueRange = 0f..maxMb,
+                valueRange = 0f..sliderMaxMb,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 4.dp),
@@ -130,6 +132,9 @@ fun FilterBar(
         }
     }
 }
+
+/** Slider caps at 4 GB (4096 MB); anything beyond is treated as "Any Size". */
+private const val SLIDER_CAP_MB = 4096L
 
 private fun formatMb(mb: Float): String = when {
     mb < 1f -> "<1 MB"

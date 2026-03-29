@@ -81,7 +81,7 @@ class BrowserViewModel @Inject constructor(
     private val _extensionFilters = MutableStateFlow<Set<String>>(emptySet())
     private val _tagFilters = MutableStateFlow<Set<String>>(emptySet())
     private val _showHidden = MutableStateFlow(false)
-    private val _autoHideEmpty = MutableStateFlow(false)
+    private val _autoHideEmpty = MutableStateFlow(true)
     private val _downloadedOnly = MutableStateFlow(false)
     private val _sizeFilterMin = MutableStateFlow(0L)
     private val _sizeFilterMax = MutableStateFlow(Long.MAX_VALUE)
@@ -210,6 +210,13 @@ class BrowserViewModel @Inject constructor(
         val allTags = itemTags.map { it.tag }.distinct().sortedWith(
             compareBy { if (it == FAVES_TAG) "" else it }
         )
+
+        // Prune active tag filters that no longer exist in the library
+        val allTagSet = allTags.toSet()
+        val staleFilters = _tagFilters.value - allTagSet
+        if (staleFilters.isNotEmpty()) {
+            _tagFilters.value = _tagFilters.value - staleFilters
+        }
 
         return BrowserUiState(
             hasLibraryData = bundles.isNotEmpty(),
@@ -505,6 +512,16 @@ class BrowserViewModel @Inject constructor(
     fun toggleAutoHideEmpty() { _autoHideEmpty.value = !_autoHideEmpty.value }
     fun toggleDownloadedOnly() { _downloadedOnly.value = !_downloadedOnly.value }
 
+    fun resetAllFilters() {
+        _searchQuery.value = ""
+        _platformFilters.value = emptySet()
+        _extensionFilters.value = emptySet()
+        _tagFilters.value = emptySet()
+        _downloadedOnly.value = false
+        _sizeFilterMin.value = 0L
+        _sizeFilterMax.value = Long.MAX_VALUE
+    }
+
     fun setSizeFilter(min: Long, max: Long) {
         _sizeFilterMin.value = min
         _sizeFilterMax.value = max
@@ -582,6 +599,9 @@ class BrowserViewModel @Inject constructor(
     }
 
     fun isLargeFile(file: FileEntity): Boolean = downloadManager.isLargeFile(file)
+
+    fun observeTagsForPath(path: String): kotlinx.coroutines.flow.Flow<Set<String>> =
+        itemTagDao.observeTagsForPath(path).map { it.toSet() }
 
     fun dismissError() { _errorMessage.value = null }
 

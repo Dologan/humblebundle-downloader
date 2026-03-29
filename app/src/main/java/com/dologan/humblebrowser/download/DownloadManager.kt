@@ -48,12 +48,12 @@ class DownloadManager @Inject constructor(
     }
 
     suspend fun enqueueDownloadToUri(file: FileEntity, destUri: android.net.Uri): UUID {
-        fileDao.setDownloadState(file.id, DownloadState.DOWNLOADING)
-
+        // External SAF downloads should not change the file's local download status
         val inputData = workDataOf(
             DownloadWorker.KEY_FILE_ID to file.id,
             DownloadWorker.KEY_DOWNLOAD_URL to file.downloadUrl,
             DownloadWorker.KEY_DEST_URI to destUri.toString(),
+            DownloadWorker.KEY_IS_EXTERNAL to true,
         )
 
         val workRequest = OneTimeWorkRequestBuilder<DownloadWorker>()

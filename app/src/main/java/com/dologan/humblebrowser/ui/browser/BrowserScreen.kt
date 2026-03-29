@@ -79,7 +79,8 @@ fun BrowserScreen(
     var showFullReloadConfirm by remember { mutableStateOf(false) }
     var showLibraryInfo by remember { mutableStateOf(false) }
     var showClearDownloadsConfirm by remember { mutableStateOf(false) }
-    var tagManageNode by remember { mutableStateOf<TreeNode?>(null) }
+    // Pair of (virtualPath, displayName) for the tag management dialog
+    var tagManageTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
     // Holds the file waiting for a SAF destination to be chosen
     var pendingDownloadToFile by remember { mutableStateOf<FileEntity?>(null) }
 
@@ -124,6 +125,14 @@ fun BrowserScreen(
                             onClick = {
                                 showMenu = false
                                 showFullReloadConfirm = true
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Reset Filters") },
+                            leadingIcon = { Icon(Icons.Default.FilterList, contentDescription = null) },
+                            onClick = {
+                                viewModel.resetAllFilters()
+                                showMenu = false
                             },
                         )
                         DropdownMenuItem(
@@ -324,7 +333,12 @@ fun BrowserScreen(
                                 }
                             },
                             onManageTags = {
-                                tagManageNode = node
+                                val name = when (node) {
+                                    is TreeNode.GroupNode -> node.displayName
+                                    is TreeNode.ProductNode -> node.product.humanName
+                                    is TreeNode.FileNode -> node.file.filename
+                                }
+                                tagManageTarget = node.virtualPath to name
                             },
                         )
                     }
@@ -443,24 +457,15 @@ fun BrowserScreen(
     }
 
     // Tag management dialog
-    tagManageNode?.let { node ->
-        val nodePath = node.virtualPath
-        val nodeName = when (node) {
-            is TreeNode.GroupNode -> node.displayName
-            is TreeNode.ProductNode -> node.product.humanName
-            is TreeNode.FileNode -> node.file.filename
-        }
-        val currentTags = when (node) {
-            is TreeNode.GroupNode -> node.tags
-            is TreeNode.ProductNode -> node.tags
-            is TreeNode.FileNode -> node.tags
-        }
+    tagManageTarget?.let { (path, name) ->
+        val tagsFlow = remember(path) { viewModel.observeTagsForPath(path) }
+        val liveTags by tagsFlow.collectAsState(initial = emptySet())
         TagManageDialog(
-            itemName = nodeName,
-            currentTags = currentTags,
-            onAddTag = { tag -> viewModel.addTagToPath(nodePath, tag) },
-            onRemoveTag = { tag -> viewModel.removeTagFromPath(nodePath, tag) },
-            onDismiss = { tagManageNode = null },
+            itemName = name,
+            currentTags = liveTags,
+            onAddTag = { tag -> viewModel.addTagToPath(path, tag) },
+            onRemoveTag = { tag -> viewModel.removeTagFromPath(path, tag) },
+            onDismiss = { tagManageTarget = null },
         )
     }
 }

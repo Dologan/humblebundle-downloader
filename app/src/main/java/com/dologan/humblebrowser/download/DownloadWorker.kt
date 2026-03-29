@@ -30,6 +30,7 @@ class DownloadWorker @AssistedInject constructor(
         val downloadUrl = inputData.getString(KEY_DOWNLOAD_URL) ?: return Result.failure()
         val destPath = inputData.getString(KEY_DEST_PATH)
         val destUriStr = inputData.getString(KEY_DEST_URI)
+        val isExternal = inputData.getBoolean(KEY_IS_EXTERNAL, false)
 
         if (destPath == null && destUriStr == null) return Result.failure()
 
@@ -42,7 +43,7 @@ class DownloadWorker @AssistedInject constructor(
                 if (freshUrl != null) {
                     response = executeDownload(freshUrl)
                 } else {
-                    fileDao.setDownloadState(fileId, DownloadState.FAILED)
+                    if (!isExternal) fileDao.setDownloadState(fileId, DownloadState.FAILED)
                     return Result.failure(
                         workDataOf(KEY_ERROR to "Download URL expired and could not be refreshed")
                     )
@@ -50,12 +51,12 @@ class DownloadWorker @AssistedInject constructor(
             }
 
             if (!response.isSuccessful) {
-                fileDao.setDownloadState(fileId, DownloadState.FAILED)
+                if (!isExternal) fileDao.setDownloadState(fileId, DownloadState.FAILED)
                 return Result.failure(workDataOf(KEY_ERROR to "HTTP ${response.code}"))
             }
 
             val body = response.body ?: run {
-                fileDao.setDownloadState(fileId, DownloadState.FAILED)
+                if (!isExternal) fileDao.setDownloadState(fileId, DownloadState.FAILED)
                 return Result.failure(workDataOf(KEY_ERROR to "Empty response body"))
             }
 
@@ -82,7 +83,7 @@ class DownloadWorker @AssistedInject constructor(
                     var bytesRead: Int
                     while (input.read(buffer).also { bytesRead = it } != -1) {
                         if (isStopped) {
-                            fileDao.updateDownloadState(fileId, DownloadState.NONE, null)
+                            if (!isExternal) fileDao.updateDownloadState(fileId, DownloadState.NONE, null)
                             destPath?.let { File(it).delete() }
                             return Result.failure(workDataOf(KEY_ERROR to "Cancelled"))
                         }
@@ -96,13 +97,16 @@ class DownloadWorker @AssistedInject constructor(
                 }
             }
 
-            // For path downloads, persist the local path; for URI downloads, just mark complete
-            fileDao.updateDownloadState(fileId, DownloadState.COMPLETE, destPath)
+            // For local path downloads, persist the local path and mark complete
+            // External (SAF) downloads do not change the file's download state
+            if (!isExternal) {
+                fileDao.updateDownloadState(fileId, DownloadState.COMPLETE, destPath)
+            }
 
             Result.success(workDataOf(KEY_FILE_ID to fileId, KEY_DEST_PATH to (destPath ?: "")))
         } catch (e: Exception) {
             destPath?.let { File(it).delete() }
-            fileDao.setDownloadState(fileId, DownloadState.FAILED)
+            if (!isExternal) fileDao.setDownloadState(fileId, DownloadState.FAILED)
             Result.failure(workDataOf(KEY_ERROR to (e.message ?: "Download failed")))
         }
     }
@@ -143,6 +147,7 @@ class DownloadWorker @AssistedInject constructor(
         const val KEY_DOWNLOAD_URL = "download_url"
         const val KEY_DEST_PATH = "dest_path"
         const val KEY_DEST_URI = "dest_uri"
+        const val KEY_IS_EXTERNAL = "is_external"
         const val KEY_PROGRESS = "progress"
         const val KEY_ERROR = "error"
     }
