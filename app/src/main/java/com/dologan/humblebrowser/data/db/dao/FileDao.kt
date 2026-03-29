@@ -62,6 +62,9 @@ interface FileDao {
     @Query("UPDATE files SET downloadState = :state WHERE id = :fileId")
     suspend fun setDownloadState(fileId: String, state: String)
 
+    @Query("UPDATE files SET downloadUrl = :url WHERE id = :fileId")
+    suspend fun updateDownloadUrl(fileId: String, url: String)
+
     @Query("DELETE FROM files WHERE productId IN (SELECT id FROM products WHERE orderId = :orderId)")
     suspend fun deleteByBundle(orderId: String)
 }

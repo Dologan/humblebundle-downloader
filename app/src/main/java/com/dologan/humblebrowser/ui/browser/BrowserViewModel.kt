@@ -37,6 +37,7 @@ data class BrowserUiState(
     val activeExtensionFilters: Set<String> = emptySet(),
     val showHidden: Boolean = false,
     val autoHideEmpty: Boolean = false,
+    val downloadedOnly: Boolean = false,
     val availablePlatforms: List<String> = emptyList(),
     val availableExtensions: List<String> = emptyList(),
     val errorMessage: String? = null,
@@ -61,6 +62,7 @@ class BrowserViewModel @Inject constructor(
     private val _extensionFilters = MutableStateFlow<Set<String>>(emptySet())
     private val _showHidden = MutableStateFlow(false)
     private val _autoHideEmpty = MutableStateFlow(false)
+    private val _downloadedOnly = MutableStateFlow(false)
     private val _isSyncing = MutableStateFlow(false)
     private val _errorMessage = MutableStateFlow<String?>(null)
 
@@ -78,11 +80,11 @@ class BrowserViewModel @Inject constructor(
             _searchQuery,
             _viewMode,
             _platformFilters,
-            combine(_extensionFilters, _showHidden, _autoHideEmpty) { ext, show, autoHide ->
-                Triple(ext, show, autoHide)
+            combine(_extensionFilters, _showHidden, _autoHideEmpty, _downloadedOnly) { ext, show, autoHide, dlOnly ->
+                FilterToggles(ext, show, autoHide, dlOnly)
             },
-        ) { expanded, search, viewMode, platforms, (extensions, showHidden, autoHideEmpty) ->
-            FilterState(expanded, search, viewMode, platforms, extensions, showHidden, autoHideEmpty)
+        ) { expanded, search, viewMode, platforms, toggles ->
+            FilterState(expanded, search, viewMode, platforms, toggles.extensions, toggles.showHidden, toggles.autoHideEmpty, toggles.downloadedOnly)
         }
     ) { dbState, filterState ->
         dbState.copy(
@@ -92,6 +94,7 @@ class BrowserViewModel @Inject constructor(
             activeExtensionFilters = filterState.extensions,
             showHidden = filterState.showHidden,
             autoHideEmpty = filterState.autoHideEmpty,
+            downloadedOnly = filterState.downloadedOnly,
         ).let { state ->
             state.copy(tree = buildTree(state, filterState))
         }
@@ -110,6 +113,13 @@ class BrowserViewModel @Inject constructor(
         BrowserUiState(isLoading = true),
     )
 
+    private data class FilterToggles(
+        val extensions: Set<String>,
+        val showHidden: Boolean,
+        val autoHideEmpty: Boolean,
+        val downloadedOnly: Boolean,
+    )
+
     private data class FilterState(
         val expanded: Set<String>,
         val search: String,
@@ -118,6 +128,7 @@ class BrowserViewModel @Inject constructor(
         val extensions: Set<String>,
         val showHidden: Boolean,
         val autoHideEmpty: Boolean,
+        val downloadedOnly: Boolean,
     )
 
     // Cached data references for tree building
@@ -154,8 +165,10 @@ class BrowserViewModel @Inject constructor(
                 extractExtension(file.filename) in filterState.extensions
             val searchOk = !searchActive ||
                 file.filename.contains(filterState.search, ignoreCase = true)
+            val downloadedOk = !filterState.downloadedOnly ||
+                file.downloadState == com.dologan.humblebrowser.data.db.entities.DownloadState.COMPLETE
 
-            platformOk && extOk && searchOk
+            platformOk && extOk && searchOk && downloadedOk
         }
 
         val productFileMap = filteredFiles.groupBy { it.productId }
@@ -395,6 +408,10 @@ class BrowserViewModel @Inject constructor(
         _autoHideEmpty.value = !_autoHideEmpty.value
     }
 
+    fun toggleDownloadedOnly() {
+        _downloadedOnly.value = !_downloadedOnly.value
+    }
+
     fun hidePath(path: String) {
         viewModelScope.launch {
             hiddenPathDao.hide(HiddenPathEntity(path = path))
@@ -420,8 +437,24 @@ class BrowserViewModel @Inject constructor(
         }
     }
 
+    init {
+        // Surface download errors as snackbar messages
+        viewModelScope.launch {
+            downloadManager.downloadErrors.collect { error ->
+                _errorMessage.value = error
+            }
+        }
+    }
+
     fun downloadFile(file: FileEntity, bundleName: String, productName: String) {
-        downloadManager.enqueueDownload(file, bundleName, productName)
+        viewModelScope.launch {
+            try {
+                val workId = downloadManager.enqueueDownload(file, bundleName, productName)
+                downloadManager.observeDownload(viewModelScope, workId, file.filename)
+            } catch (e: Exception) {
+                _errorMessage.value = "Failed to start download: ${e.message}"
+            }
+        }
     }
 
     fun cancelDownload(fileId: String) {

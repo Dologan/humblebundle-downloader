@@ -118,6 +118,13 @@ fun BrowserScreen(
                             },
                         )
                         DropdownMenuItem(
+                            text = { Text(if (state.downloadedOnly) "Show All Items" else "Downloaded Only") },
+                            onClick = {
+                                viewModel.toggleDownloadedOnly()
+                                showMenu = false
+                            },
+                        )
+                        DropdownMenuItem(
                             text = { Text("Settings") },
                             leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
                             onClick = {

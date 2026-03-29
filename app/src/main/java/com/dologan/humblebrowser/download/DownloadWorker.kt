@@ -3,9 +3,9 @@ package com.dologan.humblebrowser.download
 import android.content.Context
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
-import androidx.work.Data
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
+import com.dologan.humblebrowser.data.api.HumbleBundleApi
 import com.dologan.humblebrowser.data.db.dao.FileDao
 import com.dologan.humblebrowser.data.db.entities.DownloadState
 import dagger.assisted.Assisted
@@ -20,6 +20,7 @@ class DownloadWorker @AssistedInject constructor(
     @Assisted params: WorkerParameters,
     private val fileDao: FileDao,
     private val okHttpClient: OkHttpClient,
+    private val api: HumbleBundleApi,
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
@@ -27,14 +28,26 @@ class DownloadWorker @AssistedInject constructor(
         val downloadUrl = inputData.getString(KEY_DOWNLOAD_URL) ?: return Result.failure()
         val destPath = inputData.getString(KEY_DEST_PATH) ?: return Result.failure()
 
-        fileDao.setDownloadState(fileId, DownloadState.DOWNLOADING)
-
         return try {
             val destFile = File(destPath)
             destFile.parentFile?.mkdirs()
 
-            val request = Request.Builder().url(downloadUrl).build()
-            val response = okHttpClient.newCall(request).execute()
+            // Try downloading with the stored URL first
+            var response = executeDownload(downloadUrl)
+
+            // If the URL expired (403 or redirect to login), try to get a fresh one
+            if (!response.isSuccessful && (response.code == 403 || response.code == 401)) {
+                response.close()
+                val freshUrl = refreshDownloadUrl(fileId)
+                if (freshUrl != null) {
+                    response = executeDownload(freshUrl)
+                } else {
+                    fileDao.setDownloadState(fileId, DownloadState.FAILED)
+                    return Result.failure(
+                        workDataOf(KEY_ERROR to "Download URL expired and could not be refreshed")
+                    )
+                }
+            }
 
             if (!response.isSuccessful) {
                 fileDao.setDownloadState(fileId, DownloadState.FAILED)
@@ -55,7 +68,6 @@ class DownloadWorker @AssistedInject constructor(
                     var bytesRead: Int
                     while (input.read(buffer).also { bytesRead = it } != -1) {
                         if (isStopped) {
-                            // Cancelled - clean up partial file
                             output.close()
                             destFile.delete()
                             fileDao.updateDownloadState(fileId, DownloadState.NONE, null)
@@ -72,21 +84,54 @@ class DownloadWorker @AssistedInject constructor(
                 }
             }
 
-            val lastModified = response.header("Last-Modified")
             fileDao.updateDownloadState(fileId, DownloadState.COMPLETE, destPath)
 
             Result.success(
                 workDataOf(
                     KEY_FILE_ID to fileId,
                     KEY_DEST_PATH to destPath,
-                    KEY_LAST_MODIFIED to (lastModified ?: ""),
                 )
             )
         } catch (e: Exception) {
-            // Clean up partial file on failure
             File(destPath).delete()
             fileDao.setDownloadState(fileId, DownloadState.FAILED)
             Result.failure(workDataOf(KEY_ERROR to (e.message ?: "Download failed")))
+        }
+    }
+
+    private fun executeDownload(url: String): okhttp3.Response {
+        val request = Request.Builder().url(url).build()
+        return okHttpClient.newCall(request).execute()
+    }
+
+    /**
+     * Re-fetch the order to get a fresh download URL for this file.
+     * File IDs are formatted as "orderId:productMachineName:filename".
+     */
+    private suspend fun refreshDownloadUrl(fileId: String): String? {
+        return try {
+            val parts = fileId.split(":", limit = 3)
+            if (parts.size < 3) return null
+            val orderId = parts[0]
+            val filename = parts[2]
+
+            val order = api.getOrder(orderId)
+            for (sub in order.subproducts) {
+                for (download in sub.downloads) {
+                    for (struct in download.downloadStruct) {
+                        val url = struct.url?.web ?: continue
+                        val urlFilename = url.substringAfterLast("/").substringBefore("?")
+                        if (urlFilename == filename || struct.name == filename) {
+                            // Update the stored URL for future use
+                            fileDao.updateDownloadUrl(fileId, url)
+                            return url
+                        }
+                    }
+                }
+            }
+            null
+        } catch (e: Exception) {
+            null
         }
     }
 
@@ -96,6 +141,5 @@ class DownloadWorker @AssistedInject constructor(
         const val KEY_DEST_PATH = "dest_path"
         const val KEY_PROGRESS = "progress"
         const val KEY_ERROR = "error"
-        const val KEY_LAST_MODIFIED = "last_modified"
     }
 }
